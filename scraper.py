@@ -186,9 +186,7 @@ async def search_morele_and_get_price(query):
 
     return None
 
-
 # ===== MEDIA EXPERT =====
-
 async def search_mediaexpert_and_get_price(query):
     print("\n=== MEDIA START ===")
 
@@ -208,17 +206,18 @@ async def search_mediaexpert_and_get_price(query):
 
         await page.goto(url, timeout=30000)
         await page.wait_for_load_state("domcontentloaded")
-        await asyncio.sleep(2)
+
+        # 🔥 SCROLL żeby załadować więcej produktów
+        for _ in range(5):
+            await page.mouse.wheel(0, 2000)
+            await asyncio.sleep(1)
 
         final_url = page.url
 
+        # =========================
         # 🔥 PRODUCT PAGE
+        # =========================
         if "/search?" not in final_url:
-            try:
-                await page.wait_for_selector("div.main-price", timeout=8000)
-            except:
-                pass
-
             html = await page.content()
             await browser.close()
 
@@ -228,33 +227,32 @@ async def search_mediaexpert_and_get_price(query):
             if not price_el:
                 return None
 
-            aria = price_el.get("aria-label")
+            # 🔥 wyciągamy BEZPOŚREDNIO liczby (lepsze niż aria)
+            whole = price_el.select_one(".whole")
+            cents = price_el.select_one(".cents")
 
-            if not aria:
+            if not whole:
                 return None
 
-            match = re.search(r"(\d+)\s*złotych\s*i\s*(\d+)\s*groszy", aria)
-            if match:
-                return f"{match.group(1)},{match.group(2).zfill(2)} zł"
+            price = whole.get_text(strip=True).replace("\u202f", "")
 
-            match = re.search(r"(\d+)\s*złotych", aria)
-            if match:
-                return f"{match.group(1)},00 zł"
+            if cents:
+                price += "," + cents.get_text(strip=True)
+            else:
+                price += ",00"
 
-            return None
+            return f"{price} zł"
 
-        # 🔥 LISTA
-        try:
-            await page.wait_for_selector("div.offer-box", timeout=10000)
-        except:
-            await browser.close()
-            return None
-
+        # =========================
+        # 🔥 LISTA PRODUKTÓW
+        # =========================
         html = await page.content()
         await browser.close()
 
         soup = BeautifulSoup(html, "html.parser")
         products = soup.select("div.offer-box")
+
+        print("ZNALEZIONE:", len(products))
 
         model = extract_model(query)
 
@@ -264,6 +262,7 @@ async def search_mediaexpert_and_get_price(query):
                 continue
 
             name = name_el.get_text(strip=True)
+            print("MEDIA NAME:", name)
 
             if not is_valid_name(name, query):
                 continue
@@ -271,25 +270,34 @@ async def search_mediaexpert_and_get_price(query):
             if not match_model(name, model):
                 continue
 
+            # 🔥 FILTR GPU (żeby nie brało laptopów)
+            if "rtx" in query.lower():
+                if not any(x in name.lower() for x in ["karta", "geforce", "rtx"]):
+                    continue
+
             price_el = product.select_one("div.main-price")
             if not price_el:
                 continue
 
-            aria = price_el.get("aria-label")
+            whole = price_el.select_one(".whole")
+            cents = price_el.select_one(".cents")
 
-            if not aria:
+            if not whole:
                 continue
 
-            match = re.search(r"(\d+)\s*złotych\s*i\s*(\d+)\s*groszy", aria)
-            if match:
-                return f"{match.group(1)},{match.group(2).zfill(2)} zł"
+            price = whole.get_text(strip=True).replace("\u202f", "")
 
-            match = re.search(r"(\d+)\s*złotych", aria)
-            if match:
-                return f"{match.group(1)},00 zł"
+            if cents:
+                price += "," + cents.get_text(strip=True)
+            else:
+                price += ",00"
 
+            print("✅ MEDIA:", name)
+
+            return f"{price} zł"
+
+        print("⚠️ MEDIA fallback")
         return None
-
 
 # ===== MAIN =====
 
