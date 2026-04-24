@@ -196,7 +196,6 @@ async def search_mediaexpert_and_get_price(query):
             return None
 
         text = text.replace("\u202f", " ").replace("zł", "").strip()
-
         numbers = re.findall(r"\d+", text)
 
         if not numbers:
@@ -221,59 +220,67 @@ async def search_mediaexpert_and_get_price(query):
 
         page = await context.new_page()
 
-        url = f"https://www.mediaexpert.pl/search?query[querystring]={query.replace(' ', '+')}"
+        # 🔥 NAJPIERW SORT
+        url = f"https://www.mediaexpert.pl/search?query[querystring]={query.replace(' ', '+')}&sort=price_asc"
         print("URL:", url)
 
         await page.goto(url, timeout=30000)
         await page.wait_for_load_state("domcontentloaded")
-
-        # scroll — więcej produktów
-        for _ in range(8):
-            await page.mouse.wheel(0, 4000)
-            await asyncio.sleep(1)
-
         await asyncio.sleep(2)
 
-        final_url = page.url
-
-        # =========================
-        # 🔥 PRODUCT PAGE (np. CPU)
-        # =========================
-        if "/search?" not in final_url:
-            print("➡️ PRODUCT PAGE")
-
-            html = await page.content()
-            await browser.close()
-
-            soup = BeautifulSoup(html, "html.parser")
-
-            price_el = soup.select_one("div.main-price")
-            if not price_el:
-                return None
-
-            text = price_el.get_text(" ", strip=True)
-
-            price_float = parse_price_smart(text)
-            if price_float:
-                return f"{price_float:.2f}".replace(".", ",") + " zł"
-
-            return None
-
-        # =========================
-        # 🔥 LISTA PRODUKTÓW
-        # =========================
         html = await page.content()
-        await browser.close()
-
         soup = BeautifulSoup(html, "html.parser")
         products = soup.select("div.offer-box")
+
+        # =========================
+        # 🔥 FALLBACK → bez sortowania (CPU redirect)
+        # =========================
+        if len(products) == 0:
+            print("⚠️ fallback → no sort")
+
+            url = f"https://www.mediaexpert.pl/search?query[querystring]={query.replace(' ', '+')}"
+            print("URL2:", url)
+
+            await page.goto(url, timeout=30000)
+            await page.wait_for_load_state("domcontentloaded")
+            await asyncio.sleep(2)
+
+            final_url = page.url
+
+            # 🔥 PRODUCT PAGE
+            if "/search?" not in final_url:
+                print("➡️ PRODUCT PAGE")
+
+                html = await page.content()
+                await browser.close()
+
+                soup = BeautifulSoup(html, "html.parser")
+
+                price_el = soup.select_one("div.main-price")
+                if not price_el:
+                    return None
+
+                text = price_el.get_text(" ", strip=True)
+                price_float = parse_price_smart(text)
+
+                if price_float:
+                    return f"{price_float:.2f}".replace(".", ",") + " zł"
+
+                return None
+
+            # jeśli nadal lista → lecimy dalej
+            html = await page.content()
+            soup = BeautifulSoup(html, "html.parser")
+            products = soup.select("div.offer-box")
+
+        await browser.close()
 
         print("ZNALEZIONE:", len(products))
 
         model = extract_model(query)
         prices = []
 
-        for product in products:
+        for product in products[:8]:  # 🔥 tylko TOP 8
             name_el = product.select_one("h3.name a")
             if not name_el:
                 continue
@@ -285,29 +292,22 @@ async def search_mediaexpert_and_get_price(query):
 
             q = query.lower()
 
-            # =========================
-            # 🔥 RAM
-            # =========================
+            # ===== RAM =====
             if "ddr5" in q:
                 if "32gb" not in name_l:
                     continue
                 if "6000" not in name_l:
                     continue
 
-            # =========================
-            # 🔥 GPU
-            # =========================
+            # ===== GPU =====
             elif "rtx" in q:
                 if "laptop" in name_l or "komputer" in name_l:
                     continue
 
-            # =========================
-            # 🔥 CPU / inne
-            # =========================
+            # ===== CPU =====
             else:
                 if not is_valid_name(name, query):
                     continue
-
                 if not match_model(name, model):
                     continue
 
@@ -316,15 +316,13 @@ async def search_mediaexpert_and_get_price(query):
                 continue
 
             raw_price = price_el.get_text(" ", strip=True)
-
             price_float = parse_price_smart(raw_price)
-            if price_float is None:
-                continue
 
-            prices.append(price_float)
+            if price_float:
+                prices.append(price_float)
 
         if not prices:
-            print("⚠️ MEDIA fallback")
+            print("⚠️ MEDIA fallback final")
             return None
 
         best = min(prices)
