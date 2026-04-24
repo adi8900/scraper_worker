@@ -1,4 +1,3 @@
-import json
 import re
 import random
 import asyncio
@@ -12,50 +11,84 @@ USER_AGENTS = [
 
 # ===== HELPERY =====
 
+def normalize(text: str):
+    text = text.lower()
+    text = text.replace("–", "-").replace("—", "-")
+    text = re.sub(r"\s+", " ", text)
+    return text.strip()
+
+
 def extract_model(query):
-    match = re.search(r"\b\d{3,5}[a-zA-Z]*\b", query.lower())
-    return match.group(0) if match else None
+    q = query.lower()
+
+    # tylko CPU/GPU
+    if any(x in q for x in ["ryzen", "intel", "rtx", "gtx"]):
+        match = re.search(r"\b\d{3,5}[a-zA-Z]*\b", q)
+        return match.group(0) if match else None
+
+    return None
+
+
+def match_model(name, model):
+    if not model:
+        return True
+    return bool(re.search(rf"\b{model}\b", name, re.IGNORECASE))
+
+
+def is_valid_name(name, query=None):
+    name = normalize(name)
+
+    # 🔥 HARD FILTRY NA GOTOWE PC
+    if "/" in name:
+        return False
+
+    if re.search(r"\d+gb.*\d+tb", name):
+        return False
+
+    if re.search(r"(i\d-|ryzen\s\d)", name) and "rtx" in name:
+        return False
+
+    blacklist = [
+        "komputer",
+        "zestaw",
+        "desktop",
+        "g4m3r",
+        "gaming pc",
+        "laptop",
+    ]
+
+    for b in blacklist:
+        if b in name:
+            return False
+
+    # GPU sanity
+    if query and "rtx" in query.lower():
+        if not re.search(r"rtx\s*\d{3,4}", name):
+            return False
+
+    return True
 
 
 def is_reasonable(price_str):
     try:
-        price = float(
-            price_str.replace("zł", "").replace(",", ".").replace(" ", "").strip()
-        )
+        price = float(price_str.replace("zł", "").replace(",", ".").replace(" ", ""))
     except:
         return False
 
     return 100 < price < 20000
 
 
-def is_valid_name(name):
-    name = name.lower()
-    blacklist = ["laptop", "komputer", "zestaw", "smx"]
-    return not any(x in name for x in blacklist)
+def parse_price_to_float(price_str):
+    return float(price_str.replace("zł", "").replace(",", ".").replace(" ", ""))
 
-
-# ===== PARSERY =====
-
-def parse_mediaexpert_price(text):
-    match = re.search(r"(\d+)[,.](\d+)\s*zł", text)
-    if match:
-        return f"{match.group(1)},{match.group(2).zfill(2)} zł"
-    return None
-
-
-# ===== SEARCH =====
 
 async def launch_browser(p):
     return await p.chromium.launch(
         headless=True,
-        args=[
-            "--no-sandbox",
-            "--disable-dev-shm-usage",
-            "--disable-gpu",
-            "--disable-setuid-sandbox",
-        ]
+        args=["--no-sandbox", "--disable-dev-shm-usage"]
     )
 
+# ===== XKOM =====
 
 async def search_xkom_and_get_price(query):
     print("\n=== XKOM START ===")
@@ -73,7 +106,6 @@ async def search_xkom_and_get_price(query):
         try:
             await page.wait_for_selector('span[aria-label*="Cena"]', timeout=8000)
         except:
-            print("❌ XKOM brak selektora")
             await browser.close()
             return None
 
@@ -82,8 +114,6 @@ async def search_xkom_and_get_price(query):
 
     soup = BeautifulSoup(html, "html.parser")
     prices = soup.select('span[aria-label*="Cena"]')
-
-    print("ZNALEZIONE CENY:", len(prices))
 
     model = extract_model(query)
 
@@ -102,20 +132,18 @@ async def search_xkom_and_get_price(query):
         if not name:
             continue
 
-        if not is_valid_name(name):
-            print("❌ blacklist")
+        if not is_valid_name(name, query):
             continue
 
-        if model and model not in name.lower():
-            print("❌ model mismatch")
+        if not match_model(name, model):
             continue
 
-        print("✅ XKOM:", name)
         return text.replace("Cena:", "").strip()
 
-    print("⚠️ XKOM fallback")
     return None
 
+
+# ===== MORELE =====
 
 async def search_morele_and_get_price(query):
     print("\n=== MORELE START ===")
@@ -135,9 +163,7 @@ async def search_morele_and_get_price(query):
         await browser.close()
 
     soup = BeautifulSoup(html, "html.parser")
-    products = soup.select('div.cat-product')[:10]
-
-    print("ZNALEZIONE:", len(products))
+    products = soup.select("div.cat-product")[:10]
 
     model = extract_model(query)
 
@@ -150,28 +176,24 @@ async def search_morele_and_get_price(query):
         if not name or not price:
             continue
 
-        if not is_valid_name(name):
-            print("❌ blacklist")
+        if not is_valid_name(name, query):
             continue
 
-        if model and model not in name.lower():
-            print("❌ model mismatch")
+        if not match_model(name, model):
             continue
 
-        print("✅ MORELE:", name)
         return f"{price.replace('.', ',')} zł"
 
-    print("⚠️ MORELE fallback")
     return None
+
+
+# ===== MEDIA EXPERT =====
 
 async def search_mediaexpert_and_get_price(query):
     print("\n=== MEDIA START ===")
 
     async with async_playwright() as p:
-        browser = await p.chromium.launch(
-            headless=True,
-            args=["--no-sandbox", "--disable-dev-shm-usage"]
-        )
+        browser = await launch_browser(p)
 
         context = await browser.new_context(
             user_agent=random.choice(USER_AGENTS),
@@ -189,18 +211,13 @@ async def search_mediaexpert_and_get_price(query):
         await asyncio.sleep(2)
 
         final_url = page.url
-        print("FINAL URL:", final_url)
 
-        # =========================
-        # 🔥 CASE 1: STRONA PRODUKTU
-        # =========================
+        # 🔥 PRODUCT PAGE
         if "/search?" not in final_url:
-            print("➡️ PRODUCT PAGE")
-
             try:
                 await page.wait_for_selector("div.main-price", timeout=8000)
             except:
-                print("❌ brak ceny na stronie produktu")
+                pass
 
             html = await page.content()
             await browser.close()
@@ -212,7 +229,6 @@ async def search_mediaexpert_and_get_price(query):
                 return None
 
             aria = price_el.get("aria-label")
-            print("ARIA:", aria)
 
             if not aria:
                 return None
@@ -227,23 +243,18 @@ async def search_mediaexpert_and_get_price(query):
 
             return None
 
-        # =========================
-        # 🔥 CASE 2: LISTA PRODUKTÓW
-        # =========================
+        # 🔥 LISTA
         try:
             await page.wait_for_selector("div.offer-box", timeout=10000)
         except:
-            print("❌ nie załadowało offer-box")
-
-        await asyncio.sleep(2)
+            await browser.close()
+            return None
 
         html = await page.content()
         await browser.close()
 
         soup = BeautifulSoup(html, "html.parser")
-
         products = soup.select("div.offer-box")
-        print("ZNALEZIONE PRODUKTY:", len(products))
 
         model = extract_model(query)
 
@@ -253,16 +264,11 @@ async def search_mediaexpert_and_get_price(query):
                 continue
 
             name = name_el.get_text(strip=True)
-            print("NAME:", name)
 
-            name_lower = name.lower()
-
-            if any(x in name_lower for x in ["laptop", "komputer", "zestaw", "smx"]):
-                print("❌ blacklist")
+            if not is_valid_name(name, query):
                 continue
 
-            if model and model not in name_lower:
-                print("❌ model mismatch")
+            if not match_model(name, model):
                 continue
 
             price_el = product.select_one("div.main-price")
@@ -270,7 +276,6 @@ async def search_mediaexpert_and_get_price(query):
                 continue
 
             aria = price_el.get("aria-label")
-            print("ARIA:", aria)
 
             if not aria:
                 continue
@@ -283,14 +288,10 @@ async def search_mediaexpert_and_get_price(query):
             if match:
                 return f"{match.group(1)},00 zł"
 
-        print("⚠️ MEDIA brak dopasowania")
         return None
 
+
 # ===== MAIN =====
-
-def parse_price_to_float(price_str):
-    return float(price_str.replace("zł", "").replace(",", ".").replace(" ", "").strip())
-
 
 async def compare_prices(query):
     results = {}
@@ -316,9 +317,6 @@ async def compare_prices(query):
     except Exception as e:
         print("MEDIA ERROR:", e)
 
-    print("\n=== FINAL ===")
-    print(results)
-
     if not results:
         return None
 
@@ -329,41 +327,3 @@ async def compare_prices(query):
         "cheapest": min(numeric, key=numeric.get),
         "most_expensive": max(numeric, key=numeric.get)
     }
-
-async def compare_prices_stream(query):
-    results = {}
-
-    # START
-    yield {"type": "status", "value": "start"}
-
-    # XKOM
-    yield {"type": "status", "value": "xkom"}
-    try:
-        x = await search_xkom_and_get_price(query)
-        if x and is_reasonable(x):
-            results["x-kom"] = x
-            yield {"type": "result", "shop": "x-kom", "price": x}
-    except Exception as e:
-        print("XKOM ERROR:", e)
-
-    # MORELE
-    yield {"type": "status", "value": "morele"}
-    try:
-        m = await search_morele_and_get_price(query)
-        if m and is_reasonable(m):
-            results["morele"] = m
-            yield {"type": "result", "shop": "morele", "price": m}
-    except Exception as e:
-        print("MORELE ERROR:", e)
-
-    # MEDIA
-    yield {"type": "status", "value": "mediaexpert"}
-    try:
-        me = await search_mediaexpert_and_get_price(query)
-        if me and is_reasonable(me):
-            results["mediaexpert"] = me
-            yield {"type": "result", "shop": "mediaexpert", "price": me}
-    except Exception as e:
-        print("MEDIA ERROR:", e)
-
-    yield {"type": "done", "results": results}

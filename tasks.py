@@ -7,14 +7,14 @@ from scraper import (
     search_mediaexpert_and_get_price
 )
 
-@celery.task
+@celery.task(queue="xkom")
 def scrape_xkom(query):
     return asyncio.run(search_xkom_and_get_price(query))
 
-@celery.task
+@celery.task(queue="morele")
 def scrape_morele(query):
     return asyncio.run(search_morele_and_get_price(query))
 
-@celery.task
+@celery.task(queue="mediaexpert")
 def scrape_media(query):
     return asyncio.run(search_mediaexpert_and_get_price(query))
