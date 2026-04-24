@@ -1,0 +1,56 @@
+# ===== PYTHON =====
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.log
+
+# ===== VENV =====
+venv/
+.env/
+.env.*
+.venv/
+
+# ===== IDE =====
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# ===== OS =====
+.DS_Store
+Thumbs.db
+
+# ===== DATABASE =====
+*.db
+*.sqlite3
+
+# ===== CELERY =====
+celerybeat-schedule
+celerybeat.pid
+
+# ===== LOGI =====
+logs/
+*.log
+
+# ===== DOCKER =====
+*.pid
+*.sock
+
+# ===== PLAYWRIGHT =====
+playwright-report/
+test-results/
+.browser/
+
+# (opcjonalnie jeśli instalujesz ręcznie przeglądarki)
+ms-playwright/
+
+# ===== ENV =====
+.env
+
+# ===== CACHE =====
+.cache/
+
+# ===== TEMP =====
+tmp/
+temp/
