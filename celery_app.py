@@ -9,4 +9,10 @@ celery = Celery(
     backend=f"redis://{REDIS_HOST}:6379/0"
 )
 
+celery.conf.task_routes = {
+    "tasks.scrape_xkom": {"queue": "xkom"},
+    "tasks.scrape_morele": {"queue": "morele"},
+    "tasks.scrape_media": {"queue": "mediaexpert"},
+}
+
 import tasks
