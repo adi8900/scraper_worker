@@ -169,7 +169,7 @@ async def search_morele_and_get_price(query):
         browser = await launch_browser(p)
         page = await browser.new_page()
 
-        url = f"https://www.morele.net/wyszukiwarka/?q={query.replace(' ', '+')}&d=0"
+        url = f"https://www.morele.net/wyszukiwarka/,,,,,,,p,0,,,,/1/?q={query.replace(' ', '%20')}"
         print("URL:", url)
 
         await page.goto(url, timeout=30000)
@@ -180,9 +180,14 @@ async def search_morele_and_get_price(query):
         await browser.close()
 
     soup = BeautifulSoup(html, "html.parser")
-    products = soup.select("div.cat-product")[:10]
+
+    # 🔥 więcej produktów bo pierwsze to śmieci
+    products = soup.select("div.cat-product")[:40]
+
+    print("ZNALEZIONE:", len(products))
 
     model = extract_model(query)
+    prices = []
 
     for p in products:
         name = p.get("data-product-name", "")
@@ -193,15 +198,52 @@ async def search_morele_and_get_price(query):
         if not name or not price:
             continue
 
-        if not is_valid_name(name, query):
+        name_l = name.lower()
+        q = query.lower()
+
+        # =========================
+        # 🔥 GPU
+        # =========================
+        if "rtx" in q:
+            if "rtx" not in name_l:
+                continue
+            if "laptop" in name_l or "komputer" in name_l:
+                continue
+
+        # =========================
+        # 🔥 RAM
+        # =========================
+        elif "ddr" in q:
+            if "32gb" in q and "32gb" not in name_l:
+                continue
+            if "6000" in q and "6000" not in name_l:
+                continue
+
+        # =========================
+        # 🔥 CPU / reszta
+        # =========================
+        else:
+            if not is_valid_name(name, query):
+                continue
+
+            if model and model.lower() not in name_l:
+                continue
+
+        try:
+            price_f = float(price)
+            prices.append(price_f)
+        except:
             continue
 
-        if not match_model(name, model):
-            continue
+    if not prices:
+        print("⚠️ MORELE fallback")
+        return None
 
-        return f"{price.replace('.', ',')} zł"
+    best = min(prices)
 
-    return None
+    print("🏆 BEST PRICE:", best)
+
+    return f"{str(best).replace('.', ',')} zł"
 
 async def search_mediaexpert_and_get_price(query):
     print("\n=== MEDIA START ===")
