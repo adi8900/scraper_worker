@@ -97,51 +97,68 @@ async def search_xkom_and_get_price(query):
         browser = await launch_browser(p)
         page = await browser.new_page()
 
-        url = f"https://www.x-kom.pl/szukaj?q={query.replace(' ', '+')}"
+        url = f"https://www.x-kom.pl/szukaj?sort_by=price_asc&q={query.replace(' ', '+')}"
         print("URL:", url)
 
         await page.goto(url, timeout=30000)
         await page.wait_for_load_state("domcontentloaded")
-
-        try:
-            await page.wait_for_selector('span[aria-label*="Cena"]', timeout=8000)
-        except:
-            await browser.close()
-            return None
+        await asyncio.sleep(2)
 
         html = await page.content()
         await browser.close()
 
     soup = BeautifulSoup(html, "html.parser")
-    prices = soup.select('span[aria-label*="Cena"]')
+
+    prices_html = soup.select("span[aria-label*='Cena']")
+
+    print("CENY:", len(prices_html))
 
     model = extract_model(query)
+    prices = []
 
-    for p in prices[:10]:
-        text = p.get("aria-label")
+    for price_el in prices_html[:15]:
+        price_text = price_el.get("aria-label", "")
 
-        if not text or "zł" not in text:
+        if "zł" not in price_text:
             continue
 
-        parent = p.find_parent()
-        title = parent.find_previous("h3") if parent else None
-        name = title.get_text(strip=True) if title else ""
+        # 🔥 idziemy do produktu
+        container = price_el.find_parent("div")
+
+        if not container:
+            continue
+
+        name_el = container.find_previous("h3")
+
+        if not name_el:
+            continue
+
+        name = name_el.get_text(strip=True)
 
         print("NAME:", name)
 
-        if not name:
-            continue
-
+        # 🔥 filtry
         if not is_valid_name(name, query):
             continue
 
-        if not match_model(name, model):
+        if model and model.lower() not in name.lower():
             continue
 
-        return text.replace("Cena:", "").strip()
+        try:
+            price = parse_price_to_float(price_text.replace("Cena:", "").strip())
+            prices.append(price)
+        except:
+            continue
 
-    return None
+    if not prices:
+        print("⚠️ XKOM fallback")
+        return None
 
+    best = min(prices)
+
+    print("🏆 BEST PRICE:", best)
+
+    return f"{best:.2f}".replace(".", ",") + " zł"
 
 # ===== MORELE =====
 
