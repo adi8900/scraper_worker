@@ -18,27 +18,9 @@ def normalize(text: str):
     return text.strip()
 
 
-def extract_model(query):
-    q = query.lower()
-
-    # tylko CPU/GPU
-    if any(x in q for x in ["ryzen", "intel", "rtx", "gtx"]):
-        match = re.search(r"\b\d{3,5}[a-zA-Z]*\b", q)
-        return match.group(0) if match else None
-
-    return None
-
-
-def match_model(name, model):
-    if not model:
-        return True
-    return bool(re.search(rf"\b{model}\b", name, re.IGNORECASE))
-
-
 def is_valid_name(name, query=None):
     name = normalize(name)
 
-    # 🔥 HARD FILTRY NA GOTOWE PC
     if "/" in name:
         return False
 
@@ -48,22 +30,10 @@ def is_valid_name(name, query=None):
     if re.search(r"(i\d-|ryzen\s\d)", name) and "rtx" in name:
         return False
 
-    blacklist = [
-        "komputer",
-        "zestaw",
-        "desktop",
-        "g4m3r",
-        "gaming pc",
-        "laptop",
-    ]
+    blacklist = ["komputer", "zestaw", "desktop", "g4m3r", "gaming pc", "laptop"]
 
     for b in blacklist:
         if b in name:
-            return False
-
-    # GPU sanity
-    if query and "rtx" in query.lower():
-        if not re.search(r"rtx\s*\d{3,4}", name):
             return False
 
     return True
@@ -74,7 +44,6 @@ def is_reasonable(price_str):
         price = float(price_str.replace("zł", "").replace(",", ".").replace(" ", ""))
     except:
         return False
-
     return 100 < price < 20000
 
 
@@ -88,6 +57,109 @@ async def launch_browser(p):
         args=["--no-sandbox", "--disable-dev-shm-usage"]
     )
 
+# ===== 🔥 QUERY PARSER =====
+
+def parse_query(query):
+    q = query.lower()
+
+    data = {
+        "type": None,
+        "model": None,
+        "ram_size": None,
+        "ram_speed": None,
+        "storage_size": None,
+    }
+
+    if "rtx" in q or "gtx" in q:
+        data["type"] = "gpu"
+    elif "ddr" in q:
+        data["type"] = "ram"
+    elif "nvme" in q or "ssd" in q or "hdd" in q:
+        data["type"] = "ssd"
+    elif "ryzen" in q or "intel" in q:
+        data["type"] = "cpu"
+
+    # model (np. 7500f / 5060)
+    match = re.search(r"\b\d{3,5}[a-zA-Z]*\b", q)
+    if match:
+        data["model"] = match.group(0)
+
+    # RAM
+    size = re.search(r"(\d+)\s*gb", q)
+    if size:
+        data["ram_size"] = size.group(1)
+
+    speed = re.search(r"\b(4\d{3}|5\d{3}|6\d{3})\b", q)
+    if speed:
+        data["ram_speed"] = speed.group(1)
+
+    # STORAGE (uniwersalne)
+    storage = re.search(r"(\d+)\s*(tb|gb)", q)
+    if storage:
+        data["storage_size"] = storage.group(1) + storage.group(2)
+
+    return data
+
+# ===== 🔥 MATCH ENGINE =====
+
+def match_product(name, query_data, query):
+    name_l = name.lower()
+
+    if "outlet" in name_l:
+        return False
+
+    if not is_valid_name(name, query):
+        return False
+
+    t = query_data["type"]
+
+    # ===== GPU =====
+    if t == "gpu":
+        if not any(x in name_l for x in ["rtx", "gtx"]):
+            return False
+        if "laptop" in name_l or "komputer" in name_l:
+            return False
+        if query_data["model"] and query_data["model"] not in name_l:
+            return False
+
+    # ===== RAM =====
+    elif t == "ram":
+        if "ddr" not in name_l:
+            return False
+
+        if query_data["ram_size"] and query_data["ram_size"] not in name_l:
+            return False
+
+        if query_data["ram_speed"] and query_data["ram_speed"] not in name_l:
+            return False
+
+    # ===== SSD / HDD =====
+    elif t == "ssd":
+        if not any(x in name_l for x in ["ssd", "nvme", "hdd"]):
+            return False
+
+        if any(x in name_l for x in ["kieszeń", "adapter", "obudowa", "case"]):
+            return False
+
+        if query_data["storage_size"]:
+            size = query_data["storage_size"]
+
+            if size.endswith("tb"):
+                tb = int(size.replace("tb", ""))
+                if size not in name_l and f"{tb*1000}gb" not in name_l:
+                    return False
+
+            elif size.endswith("gb"):
+                if size not in name_l:
+                    return False
+
+    # ===== CPU =====
+    elif t == "cpu":
+        if query_data["model"] and query_data["model"] not in name_l:
+            return False
+
+    return True
+
 # ===== XKOM =====
 
 async def search_xkom_and_get_price(query):
@@ -100,7 +172,7 @@ async def search_xkom_and_get_price(query):
         url = f"https://www.x-kom.pl/szukaj?sort_by=price_asc&q={query.replace(' ', '+')}"
         print("URL:", url)
 
-        await page.goto(url, timeout=30000)
+        await page.goto(url)
         await page.wait_for_load_state("domcontentloaded")
         await asyncio.sleep(2)
 
@@ -108,40 +180,26 @@ async def search_xkom_and_get_price(query):
         await browser.close()
 
     soup = BeautifulSoup(html, "html.parser")
-
     prices_html = soup.select("span[aria-label*='Cena']")
 
-    print("CENY:", len(prices_html))
-
-    model = extract_model(query)
+    query_data = parse_query(query)
     prices = []
 
-    for price_el in prices_html[:15]:
+    for price_el in prices_html[:20]:
         price_text = price_el.get("aria-label", "")
 
-        if "zł" not in price_text:
-            continue
-
-        # 🔥 idziemy do produktu
         container = price_el.find_parent("div")
-
         if not container:
             continue
 
         name_el = container.find_previous("h3")
-
         if not name_el:
             continue
 
         name = name_el.get_text(strip=True)
-
         print("NAME:", name)
 
-        # 🔥 filtry
-        if not is_valid_name(name, query):
-            continue
-
-        if model and model.lower() not in name.lower():
+        if not match_product(name, query_data, query):
             continue
 
         try:
@@ -154,11 +212,7 @@ async def search_xkom_and_get_price(query):
         print("⚠️ XKOM fallback")
         return None
 
-    best = min(prices)
-
-    print("🏆 BEST PRICE:", best)
-
-    return f"{best:.2f}".replace(".", ",") + " zł"
+    return f"{min(prices):.2f}".replace(".", ",") + " zł"
 
 # ===== MORELE =====
 
@@ -172,7 +226,7 @@ async def search_morele_and_get_price(query):
         url = f"https://www.morele.net/wyszukiwarka/,,,,,,,p,0,,,,/1/?q={query.replace(' ', '%20')}"
         print("URL:", url)
 
-        await page.goto(url, timeout=30000)
+        await page.goto(url)
         await page.wait_for_load_state("domcontentloaded")
         await asyncio.sleep(2)
 
@@ -180,13 +234,9 @@ async def search_morele_and_get_price(query):
         await browser.close()
 
     soup = BeautifulSoup(html, "html.parser")
-
-    # 🔥 więcej produktów bo pierwsze to śmieci
     products = soup.select("div.cat-product")[:40]
 
-    print("ZNALEZIONE:", len(products))
-
-    model = extract_model(query)
+    query_data = parse_query(query)
     prices = []
 
     for p in products:
@@ -198,40 +248,11 @@ async def search_morele_and_get_price(query):
         if not name or not price:
             continue
 
-        name_l = name.lower()
-        q = query.lower()
-
-        # =========================
-        # 🔥 GPU
-        # =========================
-        if "rtx" in q:
-            if "rtx" not in name_l:
-                continue
-            if "laptop" in name_l or "komputer" in name_l:
-                continue
-
-        # =========================
-        # 🔥 RAM
-        # =========================
-        elif "ddr" in q:
-            if "32gb" in q and "32gb" not in name_l:
-                continue
-            if "6000" in q and "6000" not in name_l:
-                continue
-
-        # =========================
-        # 🔥 CPU / reszta
-        # =========================
-        else:
-            if not is_valid_name(name, query):
-                continue
-
-            if model and model.lower() not in name_l:
-                continue
+        if not match_product(name, query_data, query):
+            continue
 
         try:
-            price_f = float(price)
-            prices.append(price_f)
+            prices.append(float(price))
         except:
             continue
 
@@ -239,156 +260,62 @@ async def search_morele_and_get_price(query):
         print("⚠️ MORELE fallback")
         return None
 
-    best = min(prices)
+    return f"{min(prices):.2f}".replace(".", ",") + " zł"
 
-    print("🏆 BEST PRICE:", best)
-
-    return f"{str(best).replace('.', ',')} zł"
+# ===== MEDIAEXPERT =====
 
 async def search_mediaexpert_and_get_price(query):
     print("\n=== MEDIA START ===")
 
-    import re
-
-    def parse_price_smart(text):
-        if not text:
+    def parse_price(text):
+        text = text.replace("\u202f", " ").replace("zł", "")
+        nums = re.findall(r"\d+", text)
+        if not nums:
             return None
-
-        text = text.replace("\u202f", " ").replace("zł", "").strip()
-        numbers = re.findall(r"\d+", text)
-
-        if not numbers:
-            return None
-
-        if len(numbers) == 1:
-            return float(numbers[0])
-
-        zl = "".join(numbers[:-1])
-        gr = numbers[-1]
-
-        return float(f"{zl}.{gr}")
+        return float("".join(nums[:-1]) + "." + nums[-1])
 
     async with async_playwright() as p:
         browser = await launch_browser(p)
+        page = await browser.new_page()
 
-        context = await browser.new_context(
-            user_agent=random.choice(USER_AGENTS),
-            viewport={"width": 1366, "height": 768},
-            locale="pl-PL"
-        )
-
-        page = await context.new_page()
-
-        # 🔥 NAJPIERW SORT
         url = f"https://www.mediaexpert.pl/search?query[querystring]={query.replace(' ', '+')}&sort=price_asc"
         print("URL:", url)
 
-        await page.goto(url, timeout=30000)
+        await page.goto(url)
         await page.wait_for_load_state("domcontentloaded")
         await asyncio.sleep(2)
 
         html = await page.content()
-        soup = BeautifulSoup(html, "html.parser")
-        products = soup.select("div.offer-box")
-
-        # =========================
-        # 🔥 FALLBACK → bez sortowania (CPU redirect)
-        # =========================
-        if len(products) == 0:
-            print("⚠️ fallback → no sort")
-
-            url = f"https://www.mediaexpert.pl/search?query[querystring]={query.replace(' ', '+')}"
-            print("URL2:", url)
-
-            await page.goto(url, timeout=30000)
-            await page.wait_for_load_state("domcontentloaded")
-            await asyncio.sleep(2)
-
-            final_url = page.url
-
-            # 🔥 PRODUCT PAGE
-            if "/search?" not in final_url:
-                print("➡️ PRODUCT PAGE")
-
-                html = await page.content()
-                await browser.close()
-
-                soup = BeautifulSoup(html, "html.parser")
-
-                price_el = soup.select_one("div.main-price")
-                if not price_el:
-                    return None
-
-                text = price_el.get_text(" ", strip=True)
-                price_float = parse_price_smart(text)
-
-                if price_float:
-                    return f"{price_float:.2f}".replace(".", ",") + " zł"
-
-                return None
-
-            # jeśli nadal lista → lecimy dalej
-            html = await page.content()
-            soup = BeautifulSoup(html, "html.parser")
-            products = soup.select("div.offer-box")
-
         await browser.close()
 
-        print("ZNALEZIONE:", len(products))
+    soup = BeautifulSoup(html, "html.parser")
+    products = soup.select("div.offer-box")[:10]
 
-        model = extract_model(query)
-        prices = []
+    query_data = parse_query(query)
+    prices = []
 
-        for product in products[:8]:  # 🔥 tylko TOP 8
-            name_el = product.select_one("h3.name a")
-            if not name_el:
-                continue
+    for p in products:
+        name_el = p.select_one("h3.name a")
+        price_el = p.select_one("div.main-price")
 
-            name = name_el.get_text(strip=True)
-            name_l = name.lower()
+        if not name_el or not price_el:
+            continue
 
-            print("MEDIA NAME:", name)
+        name = name_el.get_text(strip=True)
+        print("MEDIA NAME:", name)
 
-            q = query.lower()
+        if not match_product(name, query_data, query):
+            continue
 
-            # ===== RAM =====
-            if "ddr5" in q:
-                if "32gb" not in name_l:
-                    continue
-                if "6000" not in name_l:
-                    continue
+        price = parse_price(price_el.get_text(" ", strip=True))
+        if price:
+            prices.append(price)
 
-            # ===== GPU =====
-            elif "rtx" in q:
-                if "laptop" in name_l or "komputer" in name_l:
-                    continue
+    if not prices:
+        print("⚠️ MEDIA fallback")
+        return None
 
-            # ===== CPU =====
-            else:
-                if not is_valid_name(name, query):
-                    continue
-                if not match_model(name, model):
-                    continue
-
-            price_el = product.select_one("div.main-price")
-            if not price_el:
-                continue
-
-            raw_price = price_el.get_text(" ", strip=True)
-            price_float = parse_price_smart(raw_price)
-
-            if price_float:
-                prices.append(price_float)
-
-        if not prices:
-            print("⚠️ MEDIA fallback final")
-            return None
-
-        best = min(prices)
-
-        print("🏆 BEST PRICE:", best)
-
-        return f"{best:.2f}".replace(".", ",") + " zł"
+    return f"{min(prices):.2f}".replace(".", ",") + " zł"
 
 # ===== MAIN =====
 
