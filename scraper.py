@@ -186,9 +186,29 @@ async def search_morele_and_get_price(query):
 
     return None
 
-# ===== MEDIA EXPERT =====
 async def search_mediaexpert_and_get_price(query):
     print("\n=== MEDIA START ===")
+
+    import re
+
+    def parse_price_smart(text):
+        if not text:
+            return None
+
+        text = text.replace("\u202f", " ").replace("zł", "").strip()
+
+        numbers = re.findall(r"\d+", text)
+
+        if not numbers:
+            return None
+
+        if len(numbers) == 1:
+            return float(numbers[0])
+
+        zl = "".join(numbers[:-1])
+        gr = numbers[-1]
+
+        return float(f"{zl}.{gr}")
 
     async with async_playwright() as p:
         browser = await launch_browser(p)
@@ -207,17 +227,21 @@ async def search_mediaexpert_and_get_price(query):
         await page.goto(url, timeout=30000)
         await page.wait_for_load_state("domcontentloaded")
 
-        # 🔥 SCROLL żeby załadować więcej produktów
-        for _ in range(5):
-            await page.mouse.wheel(0, 2000)
+        # scroll — więcej produktów
+        for _ in range(8):
+            await page.mouse.wheel(0, 4000)
             await asyncio.sleep(1)
+
+        await asyncio.sleep(2)
 
         final_url = page.url
 
         # =========================
-        # 🔥 PRODUCT PAGE
+        # 🔥 PRODUCT PAGE (np. CPU)
         # =========================
         if "/search?" not in final_url:
+            print("➡️ PRODUCT PAGE")
+
             html = await page.content()
             await browser.close()
 
@@ -227,21 +251,13 @@ async def search_mediaexpert_and_get_price(query):
             if not price_el:
                 return None
 
-            # 🔥 wyciągamy BEZPOŚREDNIO liczby (lepsze niż aria)
-            whole = price_el.select_one(".whole")
-            cents = price_el.select_one(".cents")
+            text = price_el.get_text(" ", strip=True)
 
-            if not whole:
-                return None
+            price_float = parse_price_smart(text)
+            if price_float:
+                return f"{price_float:.2f}".replace(".", ",") + " zł"
 
-            price = whole.get_text(strip=True).replace("\u202f", "")
-
-            if cents:
-                price += "," + cents.get_text(strip=True)
-            else:
-                price += ",00"
-
-            return f"{price} zł"
+            return None
 
         # =========================
         # 🔥 LISTA PRODUKTÓW
@@ -255,6 +271,7 @@ async def search_mediaexpert_and_get_price(query):
         print("ZNALEZIONE:", len(products))
 
         model = extract_model(query)
+        prices = []
 
         for product in products:
             name_el = product.select_one("h3.name a")
@@ -262,42 +279,59 @@ async def search_mediaexpert_and_get_price(query):
                 continue
 
             name = name_el.get_text(strip=True)
+            name_l = name.lower()
+
             print("MEDIA NAME:", name)
 
-            if not is_valid_name(name, query):
-                continue
+            q = query.lower()
 
-            if not match_model(name, model):
-                continue
+            # =========================
+            # 🔥 RAM
+            # =========================
+            if "ddr5" in q:
+                if "32gb" not in name_l:
+                    continue
+                if "6000" not in name_l:
+                    continue
 
-            # 🔥 FILTR GPU (żeby nie brało laptopów)
-            if "rtx" in query.lower():
-                if not any(x in name.lower() for x in ["karta", "geforce", "rtx"]):
+            # =========================
+            # 🔥 GPU
+            # =========================
+            elif "rtx" in q:
+                if "laptop" in name_l or "komputer" in name_l:
+                    continue
+
+            # =========================
+            # 🔥 CPU / inne
+            # =========================
+            else:
+                if not is_valid_name(name, query):
+                    continue
+
+                if not match_model(name, model):
                     continue
 
             price_el = product.select_one("div.main-price")
             if not price_el:
                 continue
 
-            whole = price_el.select_one(".whole")
-            cents = price_el.select_one(".cents")
+            raw_price = price_el.get_text(" ", strip=True)
 
-            if not whole:
+            price_float = parse_price_smart(raw_price)
+            if price_float is None:
                 continue
 
-            price = whole.get_text(strip=True).replace("\u202f", "")
+            prices.append(price_float)
 
-            if cents:
-                price += "," + cents.get_text(strip=True)
-            else:
-                price += ",00"
+        if not prices:
+            print("⚠️ MEDIA fallback")
+            return None
 
-            print("✅ MEDIA:", name)
+        best = min(prices)
 
-            return f"{price} zł"
+        print("🏆 BEST PRICE:", best)
 
-        print("⚠️ MEDIA fallback")
-        return None
+        return f"{best:.2f}".replace(".", ",") + " zł"
 
 # ===== MAIN =====
 
