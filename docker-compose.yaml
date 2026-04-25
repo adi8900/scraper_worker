@@ -1,6 +1,13 @@
 services:
-  worker:
-    build: .
-    command: celery -A celery_app.celery worker --loglevel=info -Q ${QUEUE}
-    environment:
-      - REDIS_HOST=192.168.1.133
+ worker:
+   build: .
+   command: >
+      celery -A app.workers.celery_app worker
+      -Q ${QUEUE}
+      -n ${QUEUE}@%h
+      --loglevel=info
+
+   env_file:
+      - .env
+
+   shm_size: 1gb

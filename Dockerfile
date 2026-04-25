@@ -3,14 +3,17 @@ FROM python:3.11-slim
 WORKDIR /app
 
 RUN apt-get update && apt-get install -y \
-    wget curl gnupg \
-    && rm -rf /var/lib/apt/lists/*
+    wget \
+    curl \
+    gnupg \
+ && rm -rf /var/lib/apt/lists/*
 
 COPY requirements.txt .
+
 RUN pip install --no-cache-dir -r requirements.txt
 
-RUN playwright install --with-deps
+RUN playwright install --with-deps chromium
 
 COPY . .
 
-CMD ["celery", "-A", "celery_app.celery", "worker", "--loglevel=info"]
+CMD ["uvicorn","app.main:app","--host","0.0.0.0","--port","8000"]

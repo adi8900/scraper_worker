@@ -1,9 +1,7 @@
-python-multipart
 fastapi
 uvicorn
 playwright
 beautifulsoup4
-jinja2
 sqlalchemy
 pymysql
 celery
