@@ -8,6 +8,29 @@ USER_AGENTS = [
 ]
 
 
+BLACKLIST = [
+    "laptop",
+    "komputer",
+    "zestaw",
+    "g4m3r"
+]
+
+
+BAD_WORDS = [
+    "kabel",
+    "adapter",
+    "przewód",
+    "uchwyt",
+    "etui",
+    "wentylator",
+    "pasta",
+    "obudowa",
+    "cooler",
+    "chłodzenie"
+]
+
+
+
 def extract_model(query):
 
     match = re.search(
@@ -27,36 +50,35 @@ def detect_category(query):
 
     q=query.lower()
 
-
     if (
-        "rtx" in q
-        or "radeon" in q
-        or "arc" in q
-        or "gpu" in q
-        or "karta" in q
+      "rtx" in q
+      or "radeon" in q
+      or "arc" in q
+      or "gpu" in q
+      or "karta" in q
     ):
         return "gpu"
 
 
     if (
-        "ram" in q
-        or "ddr" in q
+      "ram" in q
+      or "ddr" in q
     ):
         return "ram"
 
 
     if (
-        "ssd" in q
-        or "nvme" in q
-        or "m.2" in q
+      "ssd" in q
+      or "nvme" in q
+      or "m.2" in q
     ):
         return "ssd"
 
 
     if (
-        "ryzen" in q
-        or "intel" in q
-        or "procesor" in q
+      "ryzen" in q
+      or "intel" in q
+      or "procesor" in q
     ):
         return "cpu"
 
@@ -78,8 +100,8 @@ def match_model(
 
 
 def category_match(
-    name,
-    category
+   name,
+   category
 ):
 
     name=name.lower()
@@ -87,24 +109,24 @@ def category_match(
 
     if category=="gpu":
         return any(
-           x in name
-           for x in [
+          x in name
+          for x in [
              "rtx",
              "geforce",
              "radeon",
              "arc"
-           ]
+          ]
         )
 
 
     if category=="ram":
         return any(
-           x in name
-           for x in [
+          x in name
+          for x in [
              "ram",
              "ddr4",
              "ddr5"
-           ]
+          ]
         )
 
 
@@ -134,24 +156,33 @@ def category_match(
 
 
 
+def is_garbage(name):
+
+    name=name.lower()
+
+    return any(
+      x in name
+      for x in BAD_WORDS
+    )
+
+
+
 def is_valid_name(
-    name,
-    query=None
+   name,
+   query=None
 ):
 
     name=name.lower()
 
-    blacklist=[
-        "laptop",
-        "komputer",
-        "zestaw",
-        "g4m3r"
-    ]
-
-
     if any(
       x in name
-      for x in blacklist
+      for x in BLACKLIST
+    ):
+        return False
+
+
+    if is_garbage(
+       name
     ):
         return False
 
@@ -171,7 +202,6 @@ def parse_price(aria):
       aria
     )
 
-
     if match:
 
         whole=match.group(
@@ -190,20 +220,18 @@ def parse_price(aria):
         return f"{whole},{cents} zł"
 
 
-
     match=re.search(
       r"([\d\s]+)\s*złotych",
       aria
     )
 
-
     if match:
 
         whole=match.group(
-         1
+          1
         ).replace(
-         " ",
-         ""
+          " ",
+          ""
         )
 
         return f"{whole},00 zł"
