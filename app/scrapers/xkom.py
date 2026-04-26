@@ -1,4 +1,3 @@
-import re
 from bs4 import BeautifulSoup
 from playwright.async_api import async_playwright
 
@@ -25,14 +24,17 @@ async def search_xkom_and_get_price(query):
 
         page = await browser.new_page()
 
+        # sort po cenie rosnąco
         url = (
-            f"https://www.x-kom.pl/szukaj?q="
-            f"{query.replace(' ','+')}"
+            "https://www.x-kom.pl/szukaj?"
+            f"q={query.replace(' ','+')}"
+            "&sort_by=price_asc"
         )
 
         print("URL:", url)
 
         await page.goto(url)
+
         await page.wait_for_load_state(
             "domcontentloaded"
         )
@@ -47,8 +49,8 @@ async def search_xkom_and_get_price(query):
         "html.parser"
     )
 
-    prices = soup.select(
-        'span[aria-label*="Cena"]'
+    products = soup.select(
+        'a[href*="/p/"]'
     )
 
     model = extract_model(
@@ -56,33 +58,21 @@ async def search_xkom_and_get_price(query):
     )
 
 
-    for p in prices[:15]:
+    for product in products[:20]:
 
-        text = p.get(
-            "aria-label"
-        )
-
-        if not text:
-            continue
-
-        parent = p.find_parent()
-
-        title = (
-            parent.find_previous("h3")
-            if parent else None
-        )
-
-        if not title:
-            continue
-
-        name = title.get_text(
+        name = product.get_text(
             strip=True
         )
+
+        if not name:
+            continue
+
 
         print(
             "[XKOM]",
             name
         )
+
 
         if not is_valid_name(
             name,
@@ -98,32 +88,66 @@ async def search_xkom_and_get_price(query):
             continue
 
 
-        a = title.find("a")
+        href = product.get(
+            "href",
+            ""
+        )
 
-        href = ""
 
-        if a:
-            href = a.get(
-                "href",
-                ""
+        if href.startswith("/"):
+            href = (
+                "https://www.x-kom.pl"
+                + href
             )
 
-            if href.startswith("/"):
-                href = (
-                  "https://www.x-kom.pl"
-                  + href
+
+        card = product
+        price = None
+
+
+        for _ in range(6):
+
+            if not card:
+                break
+
+            price_el = card.select_one(
+                'span[aria-label*="Cena"]'
+            )
+
+            if price_el:
+
+                price = (
+                    price_el
+                    .get(
+                        "aria-label"
+                    )
+                    .replace(
+                        "Cena:",
+                        ""
+                    )
+                    .strip()
                 )
+
+                break
+
+
+            card = card.parent
+
+
+        if not price:
+            continue
+
+
+        print(
+            "LINK:",
+            href
+        )
 
 
         return {
-            "price":
-                text.replace(
-                    "Cena:",
-                    ""
-                ).strip(),
-
-            "url":
-                href
+            "price": price,
+            "url": href
         }
+
 
     return None
