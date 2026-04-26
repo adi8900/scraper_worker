@@ -1,6 +1,6 @@
+import asyncio
 from bs4 import BeautifulSoup
 from playwright.async_api import async_playwright
-import asyncio
 
 from app.services.query_parser import (
     extract_model,
@@ -9,7 +9,15 @@ from app.services.query_parser import (
 )
 
 
-async def search_morele_and_get_price(query):
+def parse_price(v):
+    return float(
+      v.replace(",",".")
+    )
+
+
+async def search_morele_and_get_price(
+ query
+):
 
     print(
       "\n=== MORELE START ==="
@@ -17,108 +25,121 @@ async def search_morele_and_get_price(query):
 
     async with async_playwright() as p:
 
-        browser = await p.chromium.launch(
-            headless=True,
-            args=[
-                "--no-sandbox",
-                "--disable-dev-shm-usage"
-            ]
+        browser=await p.chromium.launch(
+          headless=True,
+          args=[
+           "--no-sandbox",
+           "--disable-dev-shm-usage"
+          ]
         )
 
-        page = await browser.new_page()
+        page=await browser.new_page()
 
-        url = (
-          "https://www.morele.net/"
-          f"wyszukiwarka/?q="
-          f"{query.replace(' ','+')}&d=0"
+        url=(
+        "https://www.morele.net/"
+        "wyszukiwarka/,,,,,,,p,0,,,,/1/"
+        f"?q={query.replace(' ','+')}"
         )
 
-        print("URL:",url)
+        print(
+         "URL:",
+         url
+        )
 
         await page.goto(url)
 
         await page.wait_for_load_state(
-            "domcontentloaded"
+         "domcontentloaded"
         )
 
         await asyncio.sleep(2)
 
-        html = await page.content()
+        html=await page.content()
 
         await browser.close()
 
 
-    soup = BeautifulSoup(
-        html,
-        "html.parser"
+    soup=BeautifulSoup(
+      html,
+      "html.parser"
     )
 
-    products = soup.select(
-        "div.cat-product"
+    products=soup.select(
+      "div.cat-product"
     )[:15]
 
-    model = extract_model(
-        query
+
+    model=extract_model(
+      query
     )
 
 
-    for product in products:
+    best=None
+    best_price=None
 
-        name = product.get(
-            "data-product-name",
-            ""
+
+    for p in products:
+
+        name=p.get(
+          "data-product-name",
+          ""
         )
 
-        price = product.get(
-            "data-product-price"
-        )
-
-        print(
-          "[MORELE]",
-          name
+        price=p.get(
+          "data-product-price"
         )
 
         if not name or not price:
             continue
 
         if not is_valid_name(
-            name,
-            query
+           name,
+           query
         ):
             continue
 
         if model and not match_model(
-            name,
-            model
+          name,
+          model
         ):
             continue
 
 
-        link = product.select_one(
-            "a"
-        )
-
-        href = ""
+        link=p.select_one("a")
+        href=""
 
         if link:
-            href = link.get(
-                "href",
-                ""
-            )
+           href=link.get(
+             "href",
+             ""
+           )
 
-            if href.startswith("/"):
-                href = (
-                 "https://www.morele.net"
-                 + href
-                )
+        if href.startswith("/"):
+           href=(
+            "https://www.morele.net"
+            +href
+           )
 
 
-        return {
-            "price":
-                f"{price.replace('.',',')} zł",
+        numeric=parse_price(
+          price
+        )
 
-            "url":
-                href
-        }
 
-    return None
+        if (
+         best_price is None
+         or numeric<best_price
+        ):
+
+          best_price=numeric
+
+          best={
+           "price":
+             f"{price.replace('.',',')} zł",
+
+           "url":
+             href
+          }
+
+
+    return best

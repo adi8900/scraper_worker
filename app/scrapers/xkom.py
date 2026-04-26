@@ -3,9 +3,20 @@ from playwright.async_api import async_playwright
 
 from app.services.query_parser import (
     extract_model,
+    detect_category,
+    category_match,
     match_model,
     is_valid_name
 )
+
+
+def parse_price(v):
+    return float(
+        v.replace("zł","")
+         .replace(",",".")
+         .replace(" ","")
+         .replace("\u202f","")
+    )
 
 
 async def search_xkom_and_get_price(query):
@@ -24,14 +35,13 @@ async def search_xkom_and_get_price(query):
 
         page = await browser.new_page()
 
-        # sort po cenie rosnąco
-        url = (
+        url=(
             "https://www.x-kom.pl/szukaj?"
             f"q={query.replace(' ','+')}"
             "&sort_by=price_asc"
         )
 
-        print("URL:", url)
+        print("URL:",url)
 
         await page.goto(url)
 
@@ -39,28 +49,56 @@ async def search_xkom_and_get_price(query):
             "domcontentloaded"
         )
 
-        html = await page.content()
+        html=await page.content()
 
         await browser.close()
 
 
-    soup = BeautifulSoup(
+    soup=BeautifulSoup(
         html,
         "html.parser"
     )
 
-    products = soup.select(
-        'a[href*="/p/"]'
-    )
 
-    model = extract_model(
-        query
+    cards=soup.select(
+      'div[class*="sc-"]'
     )
 
 
-    for product in products[:20]:
+    model=extract_model(
+      query
+    )
 
-        name = product.get_text(
+    category=detect_category(
+      query
+    )
+
+
+    best=None
+    best_price=None
+    checked=0
+
+
+    for card in cards:
+
+        if checked>=15:
+            break
+
+
+        link=card.select_one(
+           'a[href*="/p/"]'
+        )
+
+        price_el=card.select_one(
+           'span[aria-label*="Cena"]'
+        )
+
+
+        if not link or not price_el:
+            continue
+
+
+        name=link.get_text(
             strip=True
         )
 
@@ -69,8 +107,8 @@ async def search_xkom_and_get_price(query):
 
 
         print(
-            "[XKOM]",
-            name
+          "[XKOM]",
+          name
         )
 
 
@@ -88,66 +126,60 @@ async def search_xkom_and_get_price(query):
             continue
 
 
-        href = product.get(
+        if not category_match(
+            name,
+            category
+        ):
+            continue
+
+
+        checked+=1
+
+
+        href=link.get(
             "href",
             ""
         )
 
-
         if href.startswith("/"):
-            href = (
-                "https://www.x-kom.pl"
-                + href
+            href=(
+             "https://www.x-kom.pl"
+             +href
             )
 
 
-        card = product
-        price = None
-
-
-        for _ in range(6):
-
-            if not card:
-                break
-
-            price_el = card.select_one(
-                'span[aria-label*="Cena"]'
-            )
-
-            if price_el:
-
-                price = (
-                    price_el
-                    .get(
-                        "aria-label"
-                    )
-                    .replace(
-                        "Cena:",
-                        ""
-                    )
-                    .strip()
-                )
-
-                break
-
-
-            card = card.parent
-
-
-        if not price:
-            continue
-
-
-        print(
-            "LINK:",
-            href
+        price=(
+          price_el
+          .get("aria-label")
+          .replace(
+             "Cena:",
+             ""
+          )
+          .strip()
         )
 
 
-        return {
-            "price": price,
-            "url": href
-        }
+        numeric=parse_price(
+          price
+        )
 
 
-    return None
+        if (
+          best_price is None
+          or numeric<best_price
+        ):
+
+            best_price=numeric
+
+            best={
+               "price":price,
+               "url":href
+            }
+
+
+    print(
+      "BEST:",
+      best
+    )
+
+    return best
