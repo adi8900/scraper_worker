@@ -9,11 +9,10 @@ from app.services.query_parser import (
 )
 
 
-
 async def search_morele_and_get_price(query):
 
     print(
-        "\n=== MORELE START ==="
+      "\n=== MORELE START ==="
     )
 
     async with async_playwright() as p:
@@ -28,32 +27,25 @@ async def search_morele_and_get_price(query):
 
         page = await browser.new_page()
 
-
         url = (
-            "https://www.morele.net/wyszukiwarka/"
-            f"?q={query.replace(' ','+')}"
-            "&d=0"
-            "&sort=price_asc"
+          "https://www.morele.net/"
+          f"wyszukiwarka/?q="
+          f"{query.replace(' ','+')}&d=0"
         )
 
-        print(
-            "URL:",
-            url
+        print("URL:",url)
+
+        await page.goto(url)
+
+        await page.wait_for_load_state(
+            "domcontentloaded"
         )
 
-        await page.goto(
-            url,
-            wait_until="domcontentloaded"
-        )
-
-        await asyncio.sleep(
-            2
-        )
+        await asyncio.sleep(2)
 
         html = await page.content()
 
         await browser.close()
-
 
 
     soup = BeautifulSoup(
@@ -63,8 +55,7 @@ async def search_morele_and_get_price(query):
 
     products = soup.select(
         "div.cat-product"
-    )[:10]
-
+    )[:15]
 
     model = extract_model(
         query
@@ -82,23 +73,19 @@ async def search_morele_and_get_price(query):
             "data-product-price"
         )
 
-
         print(
-            "[MORELE]",
-            name
+          "[MORELE]",
+          name
         )
-
 
         if not name or not price:
             continue
-
 
         if not is_valid_name(
             name,
             query
         ):
             continue
-
 
         if model and not match_model(
             name,
@@ -107,9 +94,31 @@ async def search_morele_and_get_price(query):
             continue
 
 
-        return (
-            f"{price.replace('.',',')} zł"
+        link = product.select_one(
+            "a"
         )
 
+        href = ""
+
+        if link:
+            href = link.get(
+                "href",
+                ""
+            )
+
+            if href.startswith("/"):
+                href = (
+                 "https://www.morele.net"
+                 + href
+                )
+
+
+        return {
+            "price":
+                f"{price.replace('.',',')} zł",
+
+            "url":
+                href
+        }
 
     return None

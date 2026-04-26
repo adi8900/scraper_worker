@@ -1,5 +1,4 @@
 import re
-
 from bs4 import BeautifulSoup
 from playwright.async_api import async_playwright
 
@@ -27,16 +26,15 @@ async def search_xkom_and_get_price(query):
         page = await browser.new_page()
 
         url = (
-            "https://www.x-kom.pl/szukaj"
-            f"?q={query.replace(' ','+')}"
-            "&sort_by=price_asc"
+            f"https://www.x-kom.pl/szukaj?q="
+            f"{query.replace(' ','+')}"
         )
 
         print("URL:", url)
 
-        await page.goto(
-            url,
-            wait_until="domcontentloaded"
+        await page.goto(url)
+        await page.wait_for_load_state(
+            "domcontentloaded"
         )
 
         html = await page.content()
@@ -58,40 +56,33 @@ async def search_xkom_and_get_price(query):
     )
 
 
-    for price_box in prices[:8]:
+    for p in prices[:15]:
 
-        text = price_box.get(
+        text = p.get(
             "aria-label"
         )
 
         if not text:
             continue
 
-
-        parent = price_box.find_parent()
+        parent = p.find_parent()
 
         title = (
-            parent.find_previous(
-                "h3"
-            )
-            if parent
-            else None
+            parent.find_previous("h3")
+            if parent else None
         )
 
-        name = (
-            title.get_text(
-                strip=True
-            )
-            if title
-            else ""
-        )
+        if not title:
+            continue
 
+        name = title.get_text(
+            strip=True
+        )
 
         print(
             "[XKOM]",
             name
         )
-
 
         if not is_valid_name(
             name,
@@ -107,14 +98,32 @@ async def search_xkom_and_get_price(query):
             continue
 
 
-        return (
-            text
-            .replace(
-                "Cena:",
+        a = title.find("a")
+
+        href = ""
+
+        if a:
+            href = a.get(
+                "href",
                 ""
             )
-            .strip()
-        )
 
+            if href.startswith("/"):
+                href = (
+                  "https://www.x-kom.pl"
+                  + href
+                )
+
+
+        return {
+            "price":
+                text.replace(
+                    "Cena:",
+                    ""
+                ).strip(),
+
+            "url":
+                href
+        }
 
     return None
