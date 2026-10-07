@@ -9,19 +9,28 @@ from app.services.query_parser import (
     is_valid_name
 )
 
+from app.services.product_matcher import (
+    match_products
+)
+
 
 def parse_price(v):
+
     return float(
-        v.replace("zł","")
-         .replace(",",".")
-         .replace(" ","")
-         .replace("\u202f","")
+        v.replace("zł", "")
+         .replace(",", ".")
+         .replace(" ", "")
+         .replace("\u202f", "")
     )
 
 
-async def search_xkom_and_get_price(query):
+async def search_xkom_and_get_price(
+    query
+):
 
-    print("\n=== XKOM START ===")
+    print(
+        "\n=== XKOM START ==="
+    )
 
     async with async_playwright() as p:
 
@@ -35,82 +44,76 @@ async def search_xkom_and_get_price(query):
 
         page = await browser.new_page()
 
-        url=(
+        url = (
             "https://www.x-kom.pl/szukaj?"
-            f"q={query.replace(' ','+')}"
+            f"q={query.replace(' ', '+')}"
             "&sort_by=price_asc"
         )
 
-        print("URL:",url)
+        print(
+            "URL:",
+            url
+        )
 
-        await page.goto(url)
+        await page.goto(
+            url
+        )
 
         await page.wait_for_load_state(
             "domcontentloaded"
         )
 
-        html=await page.content()
+        html = await page.content()
 
         await browser.close()
 
-
-    soup=BeautifulSoup(
+    soup = BeautifulSoup(
         html,
         "html.parser"
     )
 
-
-    cards=soup.select(
-      'div[class*="sc-"]'
+    cards = soup.select(
+        'div[class*="sc-"]'
     )
 
-
-    model=extract_model(
-      query
+    model = extract_model(
+        query
     )
 
-    category=detect_category(
-      query
+    category = detect_category(
+        query
     )
 
-
-    best=None
-    best_price=None
-    checked=0
-
+    candidates = []
 
     for card in cards:
 
-        if checked>=15:
-            break
-
-
-        link=card.select_one(
-           'a[href*="/p/"]'
+        link = card.select_one(
+            'a[href*="/p/"]'
         )
 
-        price_el=card.select_one(
-           'span[aria-label*="Cena"]'
+        price_el = card.select_one(
+            'span[aria-label*="Cena"]'
         )
-
 
         if not link or not price_el:
             continue
 
-
-        name=link.get_text(
+        name = link.get_text(
             strip=True
         )
 
         if not name:
             continue
 
-
         print(
-          "[XKOM]",
-          name
+            "[XKOM]",
+            name
         )
 
+        # -----------------------------
+        # FILTR PARSERA
+        # -----------------------------
 
         if not is_valid_name(
             name,
@@ -118,13 +121,11 @@ async def search_xkom_and_get_price(query):
         ):
             continue
 
-
         if model and not match_model(
             name,
             model
         ):
             continue
-
 
         if not category_match(
             name,
@@ -132,54 +133,104 @@ async def search_xkom_and_get_price(query):
         ):
             continue
 
+        # -----------------------------
+        # LINK
+        # -----------------------------
 
-        checked+=1
-
-
-        href=link.get(
+        href = link.get(
             "href",
             ""
         )
 
         if href.startswith("/"):
-            href=(
-             "https://www.x-kom.pl"
-             +href
+            href = (
+                "https://www.x-kom.pl"
+                + href
             )
 
+        # -----------------------------
+        # CENA
+        # -----------------------------
 
-        price=(
-          price_el
-          .get("aria-label")
-          .replace(
-             "Cena:",
-             ""
-          )
-          .strip()
+        price = (
+            price_el
+            .get("aria-label")
+            .replace(
+                "Cena:",
+                ""
+            )
+            .strip()
         )
 
-
-        numeric=parse_price(
-          price
+        numeric = parse_price(
+            price
         )
 
+        candidates.append({
+            "name": name,
+            "price": price,
+            "url": href,
+            "numeric": numeric
+        })
 
-        if (
-          best_price is None
-          or numeric<best_price
-        ):
+    if not candidates:
+        return None
 
-            best_price=numeric
-
-            best={
-               "price":price,
-               "url":href
-            }
-
+    # Maksymalnie 20 produktów do LLM.
+    candidates = candidates[:20]
 
     print(
-      "BEST:",
-      best
+        "[XKOM] Candidates:",
+        len(candidates)
     )
 
-    return best
+    # ---------------------------------------------------------
+    # OLLAMA
+    # ---------------------------------------------------------
+
+    matches = match_products(
+        query,
+        candidates
+    )
+
+    # ---------------------------------------------------------
+    # FALLBACK
+    # ---------------------------------------------------------
+
+    if matches is None:
+
+        print(
+            "[XKOM] Ollama unavailable - fallback"
+        )
+
+        valid_products = candidates
+
+    else:
+
+        valid_products = [
+            candidates[i]
+            for i in matches
+        ]
+
+    if not valid_products:
+        return None
+
+    # ---------------------------------------------------------
+    # NAJTAŃSZY
+    # ---------------------------------------------------------
+
+    best = min(
+        valid_products,
+        key=lambda x:
+            x["numeric"]
+    )
+
+    print(
+        "BEST:",
+        best
+    )
+
+    return {
+        "price": best["price"],
+        "url": best["url"]
+    }

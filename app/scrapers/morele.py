@@ -11,8 +11,13 @@ from app.services.query_parser import (
     is_valid_name
 )
 
+from app.services.product_matcher import (
+    match_products
+)
+
 
 def parse_price(v):
+
     return float(
         v.replace(",", ".")
     )
@@ -23,9 +28,8 @@ async def search_morele_and_get_price(
 ):
 
     print(
-      "\n=== MORELE START ==="
+        "\n=== MORELE START ==="
     )
-
 
     async with async_playwright() as p:
 
@@ -39,18 +43,16 @@ async def search_morele_and_get_price(
 
         page = await browser.new_page()
 
-
         url = (
-          "https://www.morele.net/"
-          "wyszukiwarka/,,,,,,,p,0,,,,/1/"
-          f"?q={query.replace(' ','+')}"
+            "https://www.morele.net/"
+            "wyszukiwarka/,,,,,,,p,0,,,,/1/"
+            f"?q={query.replace(' ', '+')}"
         )
 
         print(
-          "URL:",
-          url
+            "URL:",
+            url
         )
-
 
         await page.goto(
             url
@@ -62,61 +64,51 @@ async def search_morele_and_get_price(
 
         await asyncio.sleep(2)
 
-
         html = await page.content()
 
         await browser.close()
-
 
     soup = BeautifulSoup(
         html,
         "html.parser"
     )
 
-
     products = soup.select(
-       "div.cat-product"
+        "div.cat-product"
     )
 
-
     model = extract_model(
-       query
+        query
     )
 
     category = detect_category(
-       query
+        query
     )
 
+    candidates = []
 
-    offers=[]
-    checked=0
+    for product in products:
 
-
-    for p in products:
-
-        if checked >= 15:
-            break
-
-
-        name = p.get(
+        name = product.get(
             "data-product-name",
             ""
         )
 
-        price = p.get(
+        price = product.get(
             "data-product-price"
         )
-
 
         if not name or not price:
             continue
 
-
         print(
-          "[MORELE]",
-          name
+            "[MORELE]",
+            name
         )
 
+        # -----------------------------
+        # FILTR PARSERA
+        # -----------------------------
 
         if not is_valid_name(
             name,
@@ -124,13 +116,11 @@ async def search_morele_and_get_price(
         ):
             continue
 
-
         if model and not match_model(
             name,
             model
         ):
             continue
-
 
         if not category_match(
             name,
@@ -138,81 +128,119 @@ async def search_morele_and_get_price(
         ):
             continue
 
+        # -----------------------------
+        # DODATKOWA OCHRONA GPU
+        # -----------------------------
 
-        # dodatkowa ochrona np kabel 5060
         if (
-          category=="gpu"
-          and not any(
-             x in name.lower()
-             for x in [
-               "rtx",
-               "geforce",
-               "radeon",
-               "arc"
-             ]
-          )
+            category == "gpu"
+            and not any(
+                x in name.lower()
+                for x in [
+                    "rtx",
+                    "geforce",
+                    "radeon",
+                    "arc"
+                ]
+            )
         ):
             continue
 
+        # -----------------------------
+        # LINK
+        # -----------------------------
 
-        checked +=1
-
-
-        link = p.select_one(
-           "a"
+        link = product.select_one(
+            "a"
         )
 
-        href=""
-
+        href = ""
 
         if link:
-            href=link.get(
+            href = link.get(
                 "href",
                 ""
             )
 
-
         if href.startswith("/"):
-            href=(
-              "https://www.morele.net"
-              + href
+            href = (
+                "https://www.morele.net"
+                + href
             )
 
+        # -----------------------------
+        # CENA
+        # -----------------------------
 
-        numeric=parse_price(
-           price
+        numeric = parse_price(
+            price
         )
 
+        candidates.append({
+            "name": name,
+            "price": f"{price.replace('.', ',')} zł",
+            "url": href,
+            "numeric": numeric
+        })
 
-        offers.append(
-           {
-             "price":
-                f"{price.replace('.',',')} zł",
-
-             "url":
-                href,
-
-             "numeric":
-                numeric
-           }
-        )
-
-
-    if not offers:
+    if not candidates:
         return None
 
+    # Maksymalnie 20 produktów do LLM.
+    candidates = candidates[:20]
 
-    best=min(
-      offers,
-      key=lambda x:
-         x["numeric"]
+    print(
+        "[MORELE] Candidates:",
+        len(candidates)
     )
 
+    # ---------------------------------------------------------
+    # OLLAMA
+    # ---------------------------------------------------------
+
+    matches = match_products(
+        query,
+        candidates
+    )
+
+    # ---------------------------------------------------------
+    # FALLBACK
+    # ---------------------------------------------------------
+
+    if matches is None:
+
+        print(
+            "[MORELE] Ollama unavailable - fallback"
+        )
+
+        valid_products = candidates
+
+    else:
+
+        valid_products = [
+            candidates[i]
+            for i in matches
+        ]
+
+    if not valid_products:
+        return None
+
+    # ---------------------------------------------------------
+    # NAJTAŃSZY
+    # ---------------------------------------------------------
+
+    best = min(
+        valid_products,
+        key=lambda x:
+            x["numeric"]
+    )
+
+    print(
+        "[MORELE] BEST:",
+        best
+    )
 
     return {
-       "price":
-          best["price"],
-
-       "url":
-          best["url"]
+        "price": best["price"],
+        "url": best["url"]
     }
