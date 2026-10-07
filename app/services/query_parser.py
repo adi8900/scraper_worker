@@ -30,7 +30,6 @@ BAD_WORDS = [
 ]
 
 
-
 def extract_model(query):
 
     match = re.search(
@@ -45,46 +44,40 @@ def extract_model(query):
     )
 
 
-
 def detect_category(query):
 
-    q=query.lower()
+    q = query.lower()
 
     if (
-      "rtx" in q
-      or "radeon" in q
-      or "arc" in q
-      or "gpu" in q
-      or "karta" in q
+        "rtx" in q
+        or "radeon" in q
+        or "arc" in q
+        or "gpu" in q
+        or "karta" in q
     ):
         return "gpu"
 
-
     if (
-      "ram" in q
-      or "ddr" in q
+        "ram" in q
+        or "ddr" in q
     ):
         return "ram"
 
-
     if (
-      "ssd" in q
-      or "nvme" in q
-      or "m.2" in q
+        "ssd" in q
+        or "nvme" in q
+        or "m.2" in q
     ):
         return "ssd"
 
-
     if (
-      "ryzen" in q
-      or "intel" in q
-      or "procesor" in q
+        "ryzen" in q
+        or "intel" in q
+        or "procesor" in q
     ):
         return "cpu"
 
-
     return "other"
-
 
 
 def match_model(
@@ -98,97 +91,90 @@ def match_model(
     return model in name.lower()
 
 
-
 def category_match(
-   name,
-   category
+    name,
+    category
 ):
 
-    name=name.lower()
+    name = name.lower()
 
+    if category == "gpu":
 
-    if category=="gpu":
         return any(
-          x in name
-          for x in [
-             "rtx",
-             "geforce",
-             "radeon",
-             "arc"
-          ]
+            x in name
+            for x in [
+                "rtx",
+                "geforce",
+                "radeon",
+                "arc"
+            ]
         )
 
+    if category == "ram":
 
-    if category=="ram":
         return any(
-          x in name
-          for x in [
-             "ram",
-             "ddr4",
-             "ddr5"
-          ]
+            x in name
+            for x in [
+                "ram",
+                "ddr4",
+                "ddr5"
+            ]
         )
 
+    if category == "ssd":
 
-    if category=="ssd":
         return any(
-          x in name
-          for x in [
-             "ssd",
-             "nvme",
-             "m.2"
-          ]
+            x in name
+            for x in [
+                "ssd",
+                "nvme",
+                "m.2"
+            ]
         )
 
+    if category == "cpu":
 
-    if category=="cpu":
         return any(
-          x in name
-          for x in [
-             "ryzen",
-             "intel",
-             "core"
-          ]
+            x in name
+            for x in [
+                "ryzen",
+                "intel",
+                "core"
+            ]
         )
-
 
     return True
-
 
 
 def is_garbage(name):
 
-    name=name.lower()
+    name = name.lower()
 
     return any(
-      x in name
-      for x in BAD_WORDS
+        x in name
+        for x in BAD_WORDS
     )
 
 
-
 def is_valid_name(
-   name,
-   query=None
+    name,
+    query=None
 ):
 
-    name=name.lower()
+    name = name.lower()
 
     if any(
-      x in name
-      for x in BLACKLIST
+        x in name
+        for x in BLACKLIST
     ):
         return False
-
 
     if is_garbage(
-       name
+        name
     ):
         return False
 
-
     return True
-
 
 
 def parse_price(aria):
@@ -196,45 +182,50 @@ def parse_price(aria):
     if not aria:
         return None
 
+    aria = aria.lower()
 
-    match=re.search(
-      r"([\d\s]+)\s*złotych\s*i\s*(\d+)\s*groszy",
-      aria
+    # np.:
+    # "562 złote i 99 groszy"
+    # "1 999 złotych i 0 groszy"
+    match = re.search(
+        r"([\d\s]+)\s*złot(?:e|ych)\s*i\s*(\d+)\s*groszy",
+        aria
     )
 
     if match:
 
-        whole=match.group(
-          1
+        whole = match.group(
+            1
         ).replace(
-          " ",
-          ""
+            " ",
+            ""
         )
 
-        cents=match.group(
-          2
+        cents = match.group(
+            2
         ).zfill(
-          2
+            2
         )
 
         return f"{whole},{cents} zł"
 
-
-    match=re.search(
-      r"([\d\s]+)\s*złotych",
-      aria
+    # np.:
+    # "562 złote"
+    # "1 999 złotych"
+    match = re.search(
+        r"([\d\s]+)\s*złot(?:e|ych)",
+        aria
     )
 
     if match:
 
-        whole=match.group(
-          1
+        whole = match.group(
+            1
         ).replace(
-          " ",
-          ""
+            " ",
+            ""
         )
 
         return f"{whole},00 zł"
-
 
     return None
