@@ -1,9 +1,9 @@
+import asyncio
+
 from bs4 import BeautifulSoup
 from playwright.async_api import async_playwright
 
-from app.services.query_parser import (
-    product_matches_query,
-)
+from app.services.query_parser import product_matches_query
 
 
 def parse_price(v):
@@ -19,6 +19,9 @@ async def search_xkom_and_get_price(query):
 
     print("\n=== XKOM START ===")
 
+    max_pages = 5
+    offers = []
+
     async with async_playwright() as p:
 
         browser = await p.chromium.launch(
@@ -31,152 +34,219 @@ async def search_xkom_and_get_price(query):
 
         page = await browser.new_page()
 
-        url = (
-            "https://www.x-kom.pl/szukaj?"
-            f"q={query.replace(' ', '+')}"
-            "&sort_by=price_asc"
-        )
+        for page_number in range(1, max_pages + 1):
 
-        print(
-            "URL:",
-            url
-        )
+            if page_number == 1:
+                url = (
+                    "https://www.x-kom.pl/szukaj?"
+                    f"q={query.replace(' ', '+')}"
+                    "&sort_by=price_asc"
+                )
+            else:
+                url = (
+                    "https://www.x-kom.pl/szukaj?"
+                    f"page={page_number}"
+                    "&sort_by=price_asc"
+                    f"&q={query.replace(' ', '+')}"
+                )
 
-        await page.goto(
-            url
-        )
+            print(
+                f"\n[XKOM] STRONA {page_number}/{max_pages}"
+            )
 
-        await page.wait_for_load_state(
-            "domcontentloaded"
-        )
+            print(
+                "[XKOM] URL:",
+                url
+            )
 
-        html = await page.content()
+            try:
+                await page.goto(
+                    url,
+                    wait_until="domcontentloaded",
+                    timeout=30000
+                )
+            except Exception as e:
+                print(
+                    "[XKOM] Błąd page.goto():",
+                    e
+                )
+                continue
+
+            await asyncio.sleep(2)
+
+            html = await page.content()
+
+            soup = BeautifulSoup(
+                html,
+                "html.parser"
+            )
+
+            cards = soup.select(
+                'div[class*="sc-"]'
+            )
+
+            print(
+                "[XKOM] Elementów na stronie:",
+                len(cards)
+            )
+
+            if not cards:
+                print(
+                    "[XKOM] Brak wyników - koniec."
+                )
+                break
+
+            found_on_page = False
+
+            for card in cards:
+
+                # -----------------------------------------
+                # LINK PRODUKTU
+                # -----------------------------------------
+
+                link = card.select_one(
+                    'a[href*="/p/"]'
+                )
+
+                # -----------------------------------------
+                # CENA
+                # -----------------------------------------
+
+                price_el = card.select_one(
+                    'span[aria-label*="Cena"]'
+                )
+
+                if not link or not price_el:
+                    continue
+
+                # -----------------------------------------
+                # NAZWA
+                # -----------------------------------------
+
+                name = link.get_text(
+                    strip=True
+                )
+
+                if not name:
+                    continue
+
+                print(
+                    "[XKOM]",
+                    name
+                )
+
+                # -----------------------------------------
+                # FILTR PRODUKTU
+                # -----------------------------------------
+
+                if not product_matches_query(
+                    name,
+                    query
+                ):
+                    continue
+
+                found_on_page = True
+
+                print(
+                    "[XKOM] MATCH:",
+                    name
+                )
+
+                # -----------------------------------------
+                # URL
+                # -----------------------------------------
+
+                href = link.get(
+                    "href",
+                    ""
+                )
+
+                if href.startswith("/"):
+                    href = (
+                        "https://www.x-kom.pl"
+                        + href
+                    )
+
+                # -----------------------------------------
+                # CENA
+                # -----------------------------------------
+
+                price = (
+                    price_el
+                    .get("aria-label")
+                    .replace(
+                        "Cena:",
+                        ""
+                    )
+                    .strip()
+                )
+
+                try:
+                    numeric = parse_price(
+                        price
+                    )
+                except (
+                    ValueError,
+                    AttributeError
+                ):
+                    print(
+                        "[XKOM] Nieprawidłowa cena:",
+                        price
+                    )
+                    continue
+
+                offers.append(
+                    {
+                        "price": price,
+                        "url": href,
+                        "numeric": numeric
+                    }
+                )
+
+            if found_on_page:
+                print(
+                    "[XKOM] Znaleziono pasujący "
+                    "produkt na stronie",
+                    page_number
+                )
+
+            # Jeżeli strona ma mniej elementów niż
+            # typowa strona wyników, prawdopodobnie
+            # doszliśmy do końca.
+            #
+            # Nie przerywamy jednak tutaj na sztywno,
+            # bo selektor sc-* może obejmować dodatkowe
+            # elementy.
 
         await browser.close()
 
-    soup = BeautifulSoup(
-        html,
-        "html.parser"
-    )
+    # -----------------------------------------
+    # BRAK OFERT
+    # -----------------------------------------
 
-    cards = soup.select(
-        'div[class*="sc-"]'
-    )
-
-    best = None
-    best_price = None
-    checked = 0
-
-    for card in cards:
-
-        if checked >= 15:
-            break
-
-        # -------------------------------------------------
-        # LINK PRODUKTU
-        # -------------------------------------------------
-
-        link = card.select_one(
-            'a[href*="/p/"]'
-        )
-
-        # -------------------------------------------------
-        # CENA
-        # -------------------------------------------------
-
-        price_el = card.select_one(
-            'span[aria-label*="Cena"]'
-        )
-
-        if not link or not price_el:
-            continue
-
-        # -------------------------------------------------
-        # NAZWA
-        # -------------------------------------------------
-
-        name = link.get_text(
-            strip=True
-        )
-
-        if not name:
-            continue
+    if not offers:
 
         print(
-            "[XKOM]",
-            name
+            "[XKOM] Nie znaleziono pasującego produktu"
         )
 
-        # -------------------------------------------------
-        # DOPASOWANIE PRODUKTU
-        # -------------------------------------------------
+        return None
 
-        if not product_matches_query(
-            name,
-            query
-        ):
-            continue
+    # -----------------------------------------
+    # NAJTAŃSZA OFERTA
+    # -----------------------------------------
 
-        checked += 1
-
-        # -------------------------------------------------
-        # URL
-        # -------------------------------------------------
-
-        href = link.get(
-            "href",
-            ""
-        )
-
-        if href.startswith("/"):
-            href = (
-                "https://www.x-kom.pl"
-                + href
-            )
-
-        # -------------------------------------------------
-        # CENA
-        # -------------------------------------------------
-
-        price = (
-            price_el
-            .get("aria-label")
-            .replace(
-                "Cena:",
-                ""
-            )
-            .strip()
-        )
-
-        try:
-            numeric = parse_price(
-                price
-            )
-        except (
-            ValueError,
-            AttributeError
-        ):
-            continue
-
-        # -------------------------------------------------
-        # NAJTAŃSZA OFERTA
-        # -------------------------------------------------
-
-        if (
-            best_price is None
-            or numeric < best_price
-        ):
-
-            best_price = numeric
-
-            best = {
-                "price": price,
-                "url": href
-            }
+    best = min(
+        offers,
+        key=lambda x: x["numeric"]
+    )
 
     print(
-        "BEST:",
+        "\n[XKOM] BEST:",
         best
     )
 
-    return best
+    return {
+        "price": best["price"],
+        "url": best["url"]
+    }

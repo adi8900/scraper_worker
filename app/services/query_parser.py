@@ -500,15 +500,46 @@ def product_matches_query(name, query):
 # ---------------------------------------------------------
 
 def parse_price(aria):
+    """
+    Parsuje cenę z aria-label.
+
+    Obsługuje m.in.:
+
+        562 złote i 99 groszy
+        562 złotych i 99 groszy
+        562 złote
+        562 złotych
+        3 999 zł
+        3 999,00 zł
+        3\u202f999,00 zł
+
+    Zwraca zawsze:
+
+        "3999,00 zł"
+    """
 
     if not aria:
         return None
 
-    aria = aria.lower()
+    aria = str(aria).lower()
 
-    # np.
-    # 562 złote i 99 groszy
-    # 562 złotych i 99 groszy
+    # -----------------------------------------------------
+    # NORMALIZACJA SPACJI
+    # -----------------------------------------------------
+
+    # zwykła spacja
+    # NBSP        \xa0
+    # narrow NBSP \u202f
+    aria = (
+        aria
+        .replace("\u00a0", " ")
+        .replace("\u202f", " ")
+    )
+
+    # -----------------------------------------------------
+    # "562 złote i 99 groszy"
+    # "562 złotych i 99 groszy"
+    # -----------------------------------------------------
 
     match = re.search(
         r"([\d\s]+)\s*złot(?:e|ych)\s*i\s*(\d+)\s*groszy",
@@ -517,18 +548,85 @@ def parse_price(aria):
 
     if match:
 
-        whole = match.group(1).replace(
-            " ",
-            ""
+        whole = re.sub(
+            r"\s+",
+            "",
+            match.group(1)
         )
 
         cents = match.group(2).zfill(2)
 
         return f"{whole},{cents} zł"
 
-    # np.
-    # 562 złote
-    # 562 złotych
+    # -----------------------------------------------------
+    # "562,99 zł"
+    # "3 999,00 zł"
+    # "3 999,9 zł"
+    # -----------------------------------------------------
+
+    match = re.search(
+        r"([\d\s]+),(\d{1,2})\s*zł",
+        aria
+    )
+
+    if match:
+
+        whole = re.sub(
+            r"\s+",
+            "",
+            match.group(1)
+        )
+
+        cents = match.group(2).zfill(2)
+
+        return f"{whole},{cents} zł"
+
+    # -----------------------------------------------------
+    # "562.99 zł"
+    # "3 999.00 zł"
+    # -----------------------------------------------------
+
+    match = re.search(
+        r"([\d\s]+)\.(\d{1,2})\s*zł",
+        aria
+    )
+
+    if match:
+
+        whole = re.sub(
+            r"\s+",
+            "",
+            match.group(1)
+        )
+
+        cents = match.group(2).zfill(2)
+
+        return f"{whole},{cents} zł"
+
+    # -----------------------------------------------------
+    # "562 zł"
+    # "3 999 zł"
+    # -----------------------------------------------------
+
+    match = re.search(
+        r"([\d\s]+)\s*zł",
+        aria
+    )
+
+    if match:
+
+        whole = re.sub(
+            r"\s+",
+            "",
+            match.group(1)
+        )
+
+        return f"{whole},00 zł"
+
+    # -----------------------------------------------------
+    # "562 złote"
+    # "562 złotych"
+    # -----------------------------------------------------
 
     match = re.search(
         r"([\d\s]+)\s*złot(?:e|ych)",
@@ -537,9 +635,10 @@ def parse_price(aria):
 
     if match:
 
-        whole = match.group(1).replace(
-            " ",
-            ""
+        whole = re.sub(
+            r"\s+",
+            "",
+            match.group(1)
         )
 
         return f"{whole},00 zł"
