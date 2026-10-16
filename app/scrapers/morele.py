@@ -4,15 +4,12 @@ from bs4 import BeautifulSoup
 from playwright.async_api import async_playwright
 
 from app.services.query_parser import (
-    extract_model,
-    detect_category,
-    category_match,
-    match_model,
-    is_valid_name
+    product_matches_query,
 )
 
 
 def parse_price(v):
+
     return float(
         v.replace(",", ".")
     )
@@ -23,9 +20,8 @@ async def search_morele_and_get_price(
 ):
 
     print(
-      "\n=== MORELE START ==="
+        "\n=== MORELE START ==="
     )
-
 
     async with async_playwright() as p:
 
@@ -39,18 +35,16 @@ async def search_morele_and_get_price(
 
         page = await browser.new_page()
 
-
         url = (
-          "https://www.morele.net/"
-          "wyszukiwarka/,,,,,,,p,0,,,,/1/"
-          f"?q={query.replace(' ','+')}"
+            "https://www.morele.net/"
+            "wyszukiwarka/,,,,,,,p,0,,,,/1/"
+            f"?q={query.replace(' ', '+')}"
         )
 
         print(
-          "URL:",
-          url
+            "URL:",
+            url
         )
-
 
         await page.goto(
             url
@@ -62,41 +56,27 @@ async def search_morele_and_get_price(
 
         await asyncio.sleep(2)
 
-
         html = await page.content()
 
         await browser.close()
-
 
     soup = BeautifulSoup(
         html,
         "html.parser"
     )
 
-
     products = soup.select(
-       "div.cat-product"
+        "div.cat-product"
     )
 
+    offers = []
 
-    model = extract_model(
-       query
-    )
-
-    category = detect_category(
-       query
-    )
-
-
-    offers=[]
-    checked=0
-
+    checked = 0
 
     for p in products:
 
         if checked >= 15:
             break
-
 
         name = p.get(
             "data-product-name",
@@ -107,112 +87,83 @@ async def search_morele_and_get_price(
             "data-product-price"
         )
 
-
         if not name or not price:
             continue
 
-
         print(
-          "[MORELE]",
-          name
+            "[MORELE]",
+            name
         )
 
+        # -------------------------------------------------
+        # GŁÓWNY FILTR PRODUKTU
+        # -------------------------------------------------
 
-        if not is_valid_name(
+        if not product_matches_query(
             name,
             query
         ):
             continue
 
+        checked += 1
 
-        if model and not match_model(
-            name,
-            model
-        ):
-            continue
-
-
-        if not category_match(
-            name,
-            category
-        ):
-            continue
-
-
-        # dodatkowa ochrona np kabel 5060
-        if (
-          category=="gpu"
-          and not any(
-             x in name.lower()
-             for x in [
-               "rtx",
-               "geforce",
-               "radeon",
-               "arc"
-             ]
-          )
-        ):
-            continue
-
-
-        checked +=1
-
+        # -------------------------------------------------
+        # LINK
+        # -------------------------------------------------
 
         link = p.select_one(
-           "a"
+            "a"
         )
 
-        href=""
-
+        href = ""
 
         if link:
-            href=link.get(
+
+            href = link.get(
                 "href",
                 ""
             )
 
-
         if href.startswith("/"):
-            href=(
-              "https://www.morele.net"
-              + href
+            href = (
+                "https://www.morele.net"
+                + href
             )
 
+        # -------------------------------------------------
+        # CENA
+        # -------------------------------------------------
 
-        numeric=parse_price(
-           price
+        numeric = parse_price(
+            price
         )
-
 
         offers.append(
-           {
-             "price":
-                f"{price.replace('.',',')} zł",
+            {
+                "price":
+                    f"{price.replace('.', ',')} zł",
 
-             "url":
-                href,
+                "url":
+                    href,
 
-             "numeric":
-                numeric
-           }
+                "numeric":
+                    numeric
+            }
         )
-
 
     if not offers:
         return None
 
-
-    best=min(
-      offers,
-      key=lambda x:
-         x["numeric"]
+    best = min(
+        offers,
+        key=lambda x:
+            x["numeric"]
     )
 
-
     return {
-       "price":
-          best["price"],
+        "price":
+            best["price"],
 
-       "url":
-          best["url"]
+        "url":
+            best["url"]
     }

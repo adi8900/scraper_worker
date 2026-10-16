@@ -6,28 +6,28 @@ from playwright.async_api import async_playwright
 
 from app.services.query_parser import (
     USER_AGENTS,
-    extract_model,
-    detect_category,
-    category_match,
-    match_model,
-    is_valid_name,
-    parse_price
+    product_matches_query,
+    parse_price,
 )
 
 
 def price_to_float(v):
+
     return float(
         v.replace("zł", "")
          .replace(",", ".")
          .replace(" ", "")
          .replace("\u202f", "")
-         .replace("\xa0", "")
     )
 
 
-async def search_mediaexpert_and_get_price(query):
+async def search_mediaexpert_and_get_price(
+    query
+):
 
-    print("\n=== MEDIA START ===")
+    print(
+        "\n=== MEDIA START ==="
+    )
 
     async with async_playwright() as p:
 
@@ -40,7 +40,9 @@ async def search_mediaexpert_and_get_price(query):
         )
 
         context = await browser.new_context(
-            user_agent=random.choice(USER_AGENTS)
+            user_agent=random.choice(
+                USER_AGENTS
+            )
         )
 
         page = await context.new_page()
@@ -51,9 +53,14 @@ async def search_mediaexpert_and_get_price(query):
             "&sort=price_asc"
         )
 
-        print("URL:", url)
+        print(
+            "URL:",
+            url
+        )
 
-        await page.goto(url)
+        await page.goto(
+            url
+        )
 
         await page.wait_for_load_state(
             "domcontentloaded"
@@ -70,7 +77,10 @@ async def search_mediaexpert_and_get_price(query):
 
         final_url = page.url
 
-        print("FINAL URL:", final_url)
+        print(
+            "FINAL URL:",
+            final_url
+        )
 
         html = await page.content()
 
@@ -81,9 +91,9 @@ async def search_mediaexpert_and_get_price(query):
         "html.parser"
     )
 
-    # --------------------------------------------------
-    # SINGLE PRODUCT PAGE
-    # --------------------------------------------------
+    # -----------------------------------------------------
+    # BEZPOŚREDNIA STRONA PRODUKTU
+    # -----------------------------------------------------
 
     if "/search?" not in final_url:
 
@@ -94,59 +104,30 @@ async def search_mediaexpert_and_get_price(query):
         if not price_el:
             return None
 
-        aria = price_el.get(
-            "aria-label"
-        )
-
-        print(
-            "[MEDIA] SINGLE PRICE ARIA:",
-            repr(aria)
-        )
-
         price = parse_price(
-            aria
+            price_el.get(
+                "aria-label"
+            )
         )
 
         if not price:
             return None
 
         return {
-            "price": price,
-            "url": final_url
+            "price":
+                price,
+
+            "url":
+                final_url
         }
 
-    # --------------------------------------------------
-    # SEARCH RESULTS
-    # --------------------------------------------------
+    # -----------------------------------------------------
+    # WYNIKI WYSZUKIWANIA
+    # -----------------------------------------------------
 
-    # NIE ograniczamy tutaj do pierwszych 15.
-    # Najpierw filtrujemy, potem wybieramy najtańsze.
     products = soup.select(
         "div.offer-box"
-    )
-
-    print(
-        "[MEDIA] FOUND PRODUCTS:",
-        len(products)
-    )
-
-    model = extract_model(
-        query
-    )
-
-    category = detect_category(
-        query
-    )
-
-    print(
-        "[MEDIA] MODEL:",
-        model
-    )
-
-    print(
-        "[MEDIA] CATEGORY:",
-        category
-    )
+    )[:15]
 
     offers = []
 
@@ -164,90 +145,43 @@ async def search_mediaexpert_and_get_price(query):
         )
 
         print(
-            "[MEDIA] CHECK:",
+            "[MEDIA]",
             name
         )
 
-        # ----------------------------------------------
-        # NAME FILTER
-        # ----------------------------------------------
+        # -------------------------------------------------
+        # GŁÓWNY FILTR PRODUKTU
+        # -------------------------------------------------
 
-        if not is_valid_name(
+        if not product_matches_query(
             name,
             query
         ):
-            print(
-                "[MEDIA] REJECT: invalid name"
-            )
             continue
 
-        # ----------------------------------------------
-        # MODEL FILTER
-        # ----------------------------------------------
-
-        if model and not match_model(
-            name,
-            model
-        ):
-            print(
-                "[MEDIA] REJECT: model"
-            )
-            continue
-
-        # ----------------------------------------------
-        # CATEGORY FILTER
-        # ----------------------------------------------
-
-        if not category_match(
-            name,
-            category
-        ):
-            print(
-                "[MEDIA] REJECT: category"
-            )
-            continue
-
-        # ----------------------------------------------
-        # PRICE
-        # ----------------------------------------------
+        # -------------------------------------------------
+        # CENA
+        # -------------------------------------------------
 
         price_el = product.select_one(
             "div.main-price"
         )
 
         if not price_el:
-            print(
-                "[MEDIA] REJECT: no price element"
-            )
             continue
 
-        aria = price_el.get(
-            "aria-label"
-        )
-
-        print(
-            "[MEDIA] PRICE ARIA:",
-            repr(aria)
-        )
-
         price = parse_price(
-            aria
-        )
-
-        print(
-            "[MEDIA] PARSED PRICE:",
-            repr(price)
+            price_el.get(
+                "aria-label"
+            )
         )
 
         if not price:
-            print(
-                "[MEDIA] REJECT: price parser"
-            )
             continue
 
-        # ----------------------------------------------
-        # URL
-        # ----------------------------------------------
+        # -------------------------------------------------
+        # LINK
+        # -------------------------------------------------
 
         href = name_el.get(
             "href",
@@ -260,48 +194,23 @@ async def search_mediaexpert_and_get_price(query):
                 + href
             )
 
-        offers.append({
-            "price": price,
-            "url": href,
-            "name": name
-        })
+        offers.append(
+            {
+                "price":
+                    price,
 
-    # --------------------------------------------------
-    # NO VALID OFFERS
-    # --------------------------------------------------
+                "url":
+                    href
+            }
+        )
 
     if not offers:
-
-        print(
-            "[MEDIA] NO VALID OFFERS"
-        )
-
         return None
 
-    # --------------------------------------------------
-    # SORT BY PRICE
-    # --------------------------------------------------
-
-    offers.sort(
-        key=lambda x: price_to_float(
-            x["price"]
-        )
+    return min(
+        offers,
+        key=lambda x:
+            price_to_float(
+                x["price"]
+            )
     )
-
-    print(
-        "[MEDIA] VALID OFFERS:"
-    )
-
-    for offer in offers[:15]:
-
-        print(
-            "[MEDIA]",
-            offer["price"],
-            offer["name"]
-        )
-
-    # Najtańsza poprawna oferta
-    return {
-        "price": offers[0]["price"],
-        "url": offers[0]["url"]
-    }

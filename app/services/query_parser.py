@@ -41,9 +41,13 @@ def normalize(text):
     """
     Normalizuje nazwę produktu / zapytanie.
     """
+
+    if not text:
+        return ""
+
     text = text.lower()
 
-    # myślniki traktujemy jako separatory
+    # myślnik traktujemy jako separator
     text = text.replace("-", " ")
 
     # usuwamy nadmiarowe znaki
@@ -64,16 +68,18 @@ def extract_model(query):
     Wyciąga główny numer modelu.
 
     Przykłady:
+
         RTX 5060       -> 5060
+        RTX 5060 Ti    -> 5060
         RX 7900 XTX    -> 7900
-        Ryzen 5 7500F  -> 7500F
-        i5-14600K      -> 14600K
+        Ryzen 5 7500F  -> 7500f
+        Ryzen 7 7800X3D -> 7800x3d
+        i5-14600K      -> 14600k
     """
 
     q = normalize(query)
 
-    # Ryzen / Intel:
-    # 7500F, 7800X3D, 14600K, 14900KF
+    # Ryzen / Intel / GPU
     match = re.search(
         r"\b\d{3,5}(?:[a-z]{1,4})?\b",
         q
@@ -82,7 +88,7 @@ def extract_model(query):
     if match:
         return match.group(0)
 
-    # GPU / inne
+    # awaryjnie sam numer
     match = re.search(
         r"\b\d{3,5}\b",
         q
@@ -97,27 +103,36 @@ def extract_model(query):
 
 def extract_variant(text):
     """
-    Wyciąga wariant modelu.
+    Wyciąga wariant produktu.
 
-    Przykłady:
+    Obsługiwane m.in.:
 
         RTX 5060       -> ""
         RTX 5060 Ti    -> ti
-        RTX 5060 Super -> super
+        RTX 5060 Super  -> super
 
         RX 7900 XT     -> xt
         RX 7900 XTX    -> xtx
 
+        Ryzen 7 7800X  -> x
         Ryzen 7 7800X3D -> x3d
-        Ryzen 7 7800X   -> x
 
-        14600K          -> k
-        14600KF         -> kf
+        Ryzen 5 7500F  -> f
+
+        i5-14600       -> ""
+        i5-14600K      -> k
+        i5-14600KF     -> kf
     """
 
     text = normalize(text)
 
-    # Najpierw warianty wieloznakowe
+    if not text:
+        return ""
+
+    # -----------------------------------------------------
+    # Najpierw warianty będące osobnym słowem
+    # -----------------------------------------------------
+
     variants = [
         "xtx",
         "x3d",
@@ -142,11 +157,29 @@ def extract_variant(text):
         ):
             return variant
 
+    # -----------------------------------------------------
+    # Wariant będący częścią numeru modelu
+    #
+    # 7800x3d -> x3d
+    # 7800x   -> x
+    # 14600kf -> kf
+    # 14600k  -> k
+    # 7500f   -> f
+    # -----------------------------------------------------
+
+    match = re.search(
+        r"\b\d{3,5}(x3d|xtx|kf|ks|xt|ti|xe|x|f|k)\b",
+        text
+    )
+
+    if match:
+        return match.group(1)
+
     return ""
 
 
 # ---------------------------------------------------------
-# CPU SOCKET / TYP
+# CPU FAMILY
 # ---------------------------------------------------------
 
 def extract_cpu_family(text):
@@ -154,8 +187,11 @@ def extract_cpu_family(text):
     Rozpoznaje rodzinę CPU.
 
     Przykłady:
+
         Ryzen 5 7500F -> ryzen5
         Ryzen 7 7800X3D -> ryzen7
+        Ryzen 9 7950X3D -> ryzen9
+
         Intel Core i5-14600K -> i5
         Intel Core i7-14700K -> i7
     """
@@ -250,7 +286,6 @@ def match_model(name, model):
     name = normalize(name)
     model = normalize(model)
 
-    # model musi być osobnym tokenem
     return bool(
         re.search(
             rf"(?<!\d){re.escape(model)}(?!\d)",
@@ -265,31 +300,33 @@ def match_model(name, model):
 
 def variant_match(name, query):
     """
-    Sprawdza, czy wariant produktu odpowiada zapytaniu.
+    Porównuje wariant produktu z wariantem zapytania.
 
-    Najważniejsza część parsera:
+    Przykłady:
 
         RTX 5060       != RTX 5060 Ti
         RTX 5060       != RTX 5060 Super
 
+        RTX 5060 Ti    == RTX 5060 Ti
+
         RX 7900 XT     != RX 7900 XTX
 
-        Ryzen 7800X    != Ryzen 7800X3D
+        Ryzen 7 7800X  != Ryzen 7 7800X3D
+
+        Ryzen 5 7600   != Ryzen 5 7600X
     """
 
     name_variant = extract_variant(name)
     query_variant = extract_variant(query)
 
-    # Jeżeli zapytanie ma konkretny wariant,
-    # produkt musi mieć dokładnie ten sam wariant.
+    # Zapytanie ma konkretny wariant.
+    # Produkt musi mieć dokładnie taki sam.
     if query_variant:
-
         return name_variant == query_variant
 
-    # Jeżeli zapytanie NIE ma wariantu,
-    # nie wolno przepuszczać produktu z wariantem.
+    # Zapytanie bez wariantu.
+    # Nie przepuszczamy produktu z wariantem.
     if name_variant:
-
         return False
 
     return True
@@ -415,25 +452,44 @@ def is_valid_name(
 
 def product_matches_query(name, query):
 
+    # śmieci
+    if not is_valid_name(
+        name,
+        query
+    ):
+        return False
+
     model = extract_model(query)
     category = detect_category(query)
 
-    # podstawowy model
-    if not match_model(name, model):
+    # model
+    if not match_model(
+        name,
+        model
+    ):
         return False
 
     # kategoria
-    if not category_match(name, category):
+    if not category_match(
+        name,
+        category
+    ):
         return False
 
     # wariant
-    if not variant_match(name, query):
+    if not variant_match(
+        name,
+        query
+    ):
         return False
 
-    # Ryzen 5 vs Ryzen 7 / Intel i5 vs i7
+    # rodzina CPU
     if category == "cpu":
 
-        if not cpu_family_match(name, query):
+        if not cpu_family_match(
+            name,
+            query
+        ):
             return False
 
     return True
@@ -453,6 +509,7 @@ def parse_price(aria):
     # np.
     # 562 złote i 99 groszy
     # 562 złotych i 99 groszy
+
     match = re.search(
         r"([\d\s]+)\s*złot(?:e|ych)\s*i\s*(\d+)\s*groszy",
         aria
@@ -472,6 +529,7 @@ def parse_price(aria):
     # np.
     # 562 złote
     # 562 złotych
+
     match = re.search(
         r"([\d\s]+)\s*złot(?:e|ych)",
         aria
