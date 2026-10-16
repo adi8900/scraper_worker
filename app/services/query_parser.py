@@ -27,6 +27,9 @@ BAD_WORDS = [
     "obudowa",
     "cooler",
     "chłodzenie",
+    "outlet",
+    "refabrykowany",
+    "refurbished",
 ]
 
 
