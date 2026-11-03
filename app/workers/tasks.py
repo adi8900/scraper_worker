@@ -14,7 +14,7 @@ from app.scrapers.mediaexpert import (
     search_mediaexpert_and_get_price
 )
 
-
+from app.scrapers.shop_a import search_shop_a_and_get_price
 
 @celery.task(
     name="app.workers.tasks.scrape_xkom",
@@ -54,4 +54,13 @@ def scrape_media(query):
         search_mediaexpert_and_get_price(
             query
         )
+    )
+
+@celery.task(
+    name="app.workers.tasks.scrape_shop_a",
+    queue="shop_a"
+)
+def scrape_shop_a(query):
+    return asyncio.run(
+        search_shop_a_and_get_price(query)
     )
