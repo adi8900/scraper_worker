@@ -15,6 +15,8 @@ from app.scrapers.mediaexpert import (
 )
 
 from app.scrapers.shop_a import search_shop_a_and_get_price
+from app.scrapers.shop_b import search_shop_b_and_get_price
+from app.scrapers.shop_c import search_shop_c_and_get_price
 
 @celery.task(
     name="app.workers.tasks.scrape_xkom",
@@ -63,4 +65,23 @@ def scrape_media(query):
 def scrape_shop_a(query):
     return asyncio.run(
         search_shop_a_and_get_price(query)
+    )
+
+@celery.task(
+    name="app.workers.tasks.scrape_shop_b",
+    queue="shop_b"
+)
+def scrape_shop_b(query):
+    return asyncio.run(
+        search_shop_b_and_get_price(query)
+    )
+
+
+@celery.task(
+    name="app.workers.tasks.scrape_shop_c",
+    queue="shop_c"
+)
+def scrape_shop_c(query):
+    return asyncio.run(
+        search_shop_c_and_get_price(query)
     )
