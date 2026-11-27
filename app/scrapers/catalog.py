@@ -1,5 +1,6 @@
 """Uniform extraction interface for three intentionally different test-store HTML layouts."""
 import os
+import json
 import re
 import time
 from urllib.parse import urlencode, urljoin, urlparse
@@ -92,6 +93,8 @@ async def scrape_catalog_page(shop, page_number, method="html", query="", per_pa
                     products.append({
                         "product_id": product_id, "listing_id": listing_id,
                         "name": title.get_text(" ", strip=True),
+                        "sku": card.get("data-sku"),
+                        "specs": json.loads(card.get("data-specs", "{}")),
                         "price": numeric, "shop": shop,
                         "url": public_url(shop, listing_id),
                     })
