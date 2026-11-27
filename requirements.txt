@@ -3,3 +3,4 @@ beautifulsoup4
 celery
 redis
 httpx
+packaging
