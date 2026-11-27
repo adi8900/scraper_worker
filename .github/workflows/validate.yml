@@ -1,0 +1,35 @@
+name: Validate worker extraction
+
+on:
+  push:
+    branches: [worker, thesis-refinement-2026-11]
+  pull_request:
+
+jobs:
+  extract:
+    runs-on: ubuntu-latest
+    env:
+      SHOP_BASE_URL: http://127.0.0.1:8090
+      SHOP_PUBLIC_BASE_URL: http://127.0.0.1:8090
+    steps:
+      - uses: actions/checkout@v4
+      - name: Checkout matching test shops
+        uses: actions/checkout@v4
+        with:
+          repository: adi8900/web_scrappper
+          ref: thesis-refinement-2026-11
+          path: shop-fixture
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install dependencies
+        run: |
+          pip install -r requirements.txt -r shop-fixture/test-shops/requirements.txt pytest
+          python -m playwright install --with-deps chromium
+      - name: Compile worker sources
+        run: python -m compileall -q app tests
+      - name: Start test shops and run extraction tests
+        run: |
+          python -m uvicorn app:app --app-dir shop-fixture/test-shops --port 8090 --host 127.0.0.1 &
+          for i in $(seq 1 30); do curl -fsS http://127.0.0.1:8090/health && break || sleep 1; done
+          PYTHONPATH=. python -m pytest -q tests/test_extraction.py
