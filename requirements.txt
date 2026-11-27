@@ -1,8 +1,5 @@
-fastapi
-uvicorn
 playwright
 beautifulsoup4
-sqlalchemy
-pymysql
 celery
 redis
+httpx
