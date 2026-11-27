@@ -3,11 +3,14 @@ services:
     build: .
     command: >
       celery -A app.workers.celery_app worker
-      -Q ${QUEUE}
+      -Q scraping,catalog
       -n ${WORKER_NAME:-worker}@%h
       --concurrency=${CONCURRENCY:-2}
       --prefetch-multiplier=1
       --loglevel=info
-    env_file:
-      - .env
+    environment:
+      REDIS_URL: ${REDIS_URL:?Set REDIS_URL in .env}
+      SHOP_BASE_URL: ${SHOP_BASE_URL:?Set SHOP_BASE_URL in .env}
+      SHOP_PUBLIC_BASE_URL: ${SHOP_PUBLIC_BASE_URL:-http://localhost:8090}
     shm_size: 1gb
+    restart: unless-stopped
